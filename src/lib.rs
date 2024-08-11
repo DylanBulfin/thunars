@@ -1,6 +1,7 @@
-mod browser;
+pub mod browser;
 pub mod tui;
 mod components;
+mod commands;
 
 use std::{fmt::{self, Display, Formatter}, io, result};
 
