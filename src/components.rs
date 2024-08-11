@@ -21,7 +21,27 @@ pub struct FileList {
     scroll: usize,
     selected: usize,
     max_entries: u16,
+    hint_mode: bool,
+    hint_choices: Vec<String>,
     visible: bool,
+}
+
+fn initialize_hints() -> Vec<String> {
+    let one_letter = ["p", "l", "f", "u", "w", "y", "q", ";"].map(|s| s.to_string());
+
+    let first_options = ["t", "n", "s", "e", "r", "i", "a", "o"];
+    let second_options = [
+        "t", "n", "s", "e", "r", "i", "a", "o", "p", "l", "f", "u", "w", "y", "q", ";",
+    ];
+    let mut two_letters = first_options
+        .into_iter()
+        .flat_map(|c1| second_options.into_iter().map(|c2| c2.to_string() + c1))
+        .collect::<Vec<_>>();
+
+    let mut hints = Vec::from(one_letter);
+    hints.append(&mut two_letters);
+
+    hints
 }
 
 impl Widget for FileList {
@@ -34,10 +54,27 @@ impl Widget for FileList {
                     .iter()
                     .enumerate()
                     .map(|(i, f)| {
-                        if i == self.selected {
-                            Line::from(f.as_str().black().on_white())
+                        if self.hint_mode {
+                            let hint = self.hint_choices[i].clone();
+                            if hint.len() == 1 {
+                                Line::from(vec![
+                                    hint.green().on_black(),
+                                    "  ".on_black(),
+                                    f.clone().gray().on_black(),
+                                ])
+                            } else {
+                                Line::from(vec![
+                                    hint.blue().on_black(),
+                                    "  ".on_black(),
+                                    f.clone().gray().on_black(),
+                                ])
+                            }
                         } else {
-                            Line::from(f.as_str())
+                            if i == self.selected {
+                                Line::from(vec!["   ".on_black(), f.clone().black().on_white()])
+                            } else {
+                                Line::from(vec!["   ".on_black(), f.clone().white().on_black()])
+                            }
                         }
                     })
                     .collect::<Vec<_>>(),
@@ -103,6 +140,8 @@ impl Window {
             scroll: 0,
             selected: 0,
             max_entries: 0,
+            hint_mode: false,
+            hint_choices: initialize_hints(),
             visible: true,
         };
 
@@ -144,6 +183,10 @@ impl Window {
         } else {
             self.file_list.selected = self.file_list.selected.saturating_sub(1);
         }
+    }
+    
+    pub fn hint_mode(&mut self) {
+        self.file_list.hint_mode = true;
     }
 
     pub fn get_curr_entry(&mut self) -> String {

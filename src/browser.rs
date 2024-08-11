@@ -100,19 +100,21 @@ impl Browser {
                         FileListCommand::EntryScroll(true)
                     } else if c == 'e' {
                         FileListCommand::EntryScroll(false)
+                    } else if c == 'f' {
+                        FileListCommand::HintMode
                     } else {
                         FileListCommand::None
                     }
                 }
-                KeyCode::Enter => {
-                    FileListCommand::SelectEntry(self.window.get_curr_entry())
-                }
+                KeyCode::Enter => FileListCommand::SelectEntry(self.window.get_curr_entry()),
                 _ => FileListCommand::None,
             }
         } else {
             FileListCommand::None
         }
     }
+    
+    // fn hint_mode(&mut self) -> Result<>
 
     fn execute_command(&mut self, comm: FileListCommand) -> Result<()> {
         match comm {
@@ -128,6 +130,7 @@ impl Browser {
                 }
             }
             FileListCommand::Exit => self.exit = true,
+            FileListCommand::HintMode => self.window.hint_mode(),
             _ => (),
         };
 
