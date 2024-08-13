@@ -46,11 +46,21 @@ impl Browser {
         let files = fetch_files(curr_dir.as_path())?;
 
         Ok(Self {
-            window: Window::new(files),
+            window: Window::new(files, curr_dir.to_string_lossy().to_string()),
             terminal,
             curr_dir,
             exit: false,
         })
+    }
+
+    fn draw(&mut self) -> Result<()> {
+        self.terminal.draw(|f| {
+            f.render_widget(self.window.clone(), f.area());
+            self.window
+                .update_max_entries((f.area().height - TOTAL_USED_LINES) as usize);
+        })?;
+
+        Ok(())
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -65,11 +75,7 @@ impl Browser {
                 }
             }
 
-            self.terminal.draw(|f| {
-                f.render_widget(self.window.clone(), f.area());
-                self.window
-                    .update_max_entries(f.area().height - TOTAL_USED_LINES);
-            })?;
+            self.draw()?;
 
             if self.exit {
                 return Ok(());
@@ -78,10 +84,15 @@ impl Browser {
     }
 
     fn change_directory(&mut self, new_dir: PathBuf) -> Result<()> {
-        self.curr_dir = new_dir;
+        self.curr_dir = new_dir.canonicalize().expect("Trying to cd to non-existent directory");
+        
+        let mut sorted_files =fetch_files(self.curr_dir.as_path())?;
+        sorted_files.sort();
 
         self.window
-            .update_files(fetch_files(self.curr_dir.as_path())?);
+            .update_files(sorted_files);
+        self.window
+            .update_cwd(self.curr_dir.to_string_lossy().to_string());
 
         Ok(())
     }
@@ -113,8 +124,43 @@ impl Browser {
             FileListCommand::None
         }
     }
-    
-    // fn hint_mode(&mut self) -> Result<>
+
+    fn hint_mode(&mut self) -> Result<()> {
+        self.window.hint_mode(true);
+        let mut hint = String::new();
+
+        loop {
+            if event::poll(Duration::from_millis(16))? {
+                match event::read()? {
+                    event::Event::Key(ke) => {
+                        if ke.kind == KeyEventKind::Press {
+                            match ke.code {
+                                KeyCode::Esc => break,
+                                KeyCode::Char(c) => {
+                                    hint.push(c);
+                                    if self.window.valid_hint(&hint) {
+                                        break;
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
+            self.draw()?;
+        }
+
+        if self.window.valid_hint(&hint) {
+            self.window.jump_hint(hint)
+        }
+        
+        self.window.hint_mode(false);
+
+        Ok(())
+    }
 
     fn execute_command(&mut self, comm: FileListCommand) -> Result<()> {
         match comm {
@@ -130,7 +176,7 @@ impl Browser {
                 }
             }
             FileListCommand::Exit => self.exit = true,
-            FileListCommand::HintMode => self.window.hint_mode(),
+            FileListCommand::HintMode => self.hint_mode()?,
             _ => (),
         };
 

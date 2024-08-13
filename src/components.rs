@@ -1,3 +1,4 @@
+use bimap::BiHashMap;
 use ratatui::{
     prelude::{Buffer, Rect},
     style::Stylize,
@@ -20,26 +21,31 @@ pub struct FileList {
     files: Vec<String>,
     scroll: usize,
     selected: usize,
-    max_entries: u16,
+    max_entries: usize,
     hint_mode: bool,
-    hint_choices: Vec<String>,
+    hint_choices: BiHashMap<usize, String>,
     visible: bool,
 }
 
-fn initialize_hints() -> Vec<String> {
+fn initialize_hints() -> BiHashMap<usize, String> {
     let one_letter = ["p", "l", "f", "u", "w", "y", "q", ";"].map(|s| s.to_string());
 
     let first_options = ["t", "n", "s", "e", "r", "i", "a", "o"];
     let second_options = [
         "t", "n", "s", "e", "r", "i", "a", "o", "p", "l", "f", "u", "w", "y", "q", ";",
     ];
-    let mut two_letters = first_options
+    let two_letters = first_options
         .into_iter()
-        .flat_map(|c1| second_options.into_iter().map(|c2| c2.to_string() + c1))
+        .flat_map(|c1| second_options.into_iter().map(|c2| c1.to_string() + c2))
         .collect::<Vec<_>>();
 
-    let mut hints = Vec::from(one_letter);
-    hints.append(&mut two_letters);
+    let mut hints = BiHashMap::new();
+    for (i, o) in one_letter.iter().enumerate() {
+        hints.insert(i, o.to_string());
+    }
+    for (i, t) in two_letters.into_iter().enumerate() {
+        hints.insert(i + one_letter.len(), t);
+    }
 
     hints
 }
@@ -55,7 +61,11 @@ impl Widget for FileList {
                     .enumerate()
                     .map(|(i, f)| {
                         if self.hint_mode {
-                            let hint = self.hint_choices[i].clone();
+                            let hint = self
+                                .hint_choices
+                                .get_by_left(&i)
+                                .expect("Unable to process hint")
+                                .clone();
                             if hint.len() == 1 {
                                 Line::from(vec![
                                     hint.green().on_black(),
@@ -65,7 +75,7 @@ impl Widget for FileList {
                             } else {
                                 Line::from(vec![
                                     hint.blue().on_black(),
-                                    "  ".on_black(),
+                                    " ".on_black(),
                                     f.clone().gray().on_black(),
                                 ])
                             }
@@ -134,7 +144,7 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(files: Vec<String>) -> Self {
+    pub fn new(files: Vec<String>, starting_dir: String) -> Self {
         let file_list = FileList {
             files,
             scroll: 0,
@@ -146,7 +156,7 @@ impl Window {
         };
 
         let curr_dir = CurrDirectory {
-            curr_directory: "Testing Directory".to_string(),
+            curr_directory: starting_dir,
             visible: true,
         };
 
@@ -166,7 +176,7 @@ impl Window {
                     .file_list
                     .files
                     .len()
-                    .saturating_sub(self.file_list.max_entries as usize)
+                    .saturating_sub(self.file_list.max_entries)
             {
                 self.file_list.scroll += 1;
             }
@@ -177,27 +187,58 @@ impl Window {
 
     pub fn scroll_entry(&mut self, down: bool) {
         if down {
-            if self.file_list.selected < self.file_list.files.len() - 1 {
+            if self.file_list.scroll + self.file_list.selected >= self.file_list.files.len() - 1 {
+                return;
+            }
+
+            if self.file_list.selected >= self.file_list.max_entries - 1 {
+                self.file_list.scroll +=
+                    self.file_list.selected + 1 - (self.file_list.max_entries - 1);
+                self.file_list.selected = self.file_list.max_entries - 1;
+            } else {
                 self.file_list.selected += 1;
             }
         } else {
-            self.file_list.selected = self.file_list.selected.saturating_sub(1);
+            if self.file_list.selected == 0 && self.file_list.scroll != 0 {
+                self.file_list.scroll -= 1;
+            } else {
+                self.file_list.selected = self.file_list.selected.saturating_sub(1);
+            }
         }
     }
-    
-    pub fn hint_mode(&mut self) {
-        self.file_list.hint_mode = true;
+
+    pub fn hint_mode(&mut self, on: bool) {
+        self.file_list.hint_mode = on;
+    }
+
+    pub fn valid_hint(&mut self, hint: &String) -> bool {
+        self.file_list
+            .hint_choices
+            .right_values()
+            .any(|s| s == hint)
+    }
+
+    pub fn jump_hint(&mut self, hint: String) {
+        self.file_list.selected = *self
+            .file_list
+            .hint_choices
+            .get_by_right(&hint)
+            .expect("Unable to find hint")
     }
 
     pub fn get_curr_entry(&mut self) -> String {
         self.file_list.files[self.file_list.selected].clone()
     }
 
+    pub fn update_cwd(&mut self, dir: String) {
+        self.curr_dir.curr_directory = dir
+    }
+
     pub fn update_files(&mut self, files: Vec<String>) {
         self.file_list.files = files;
     }
 
-    pub fn update_max_entries(&mut self, max_entries: u16) {
+    pub fn update_max_entries(&mut self, max_entries: usize) {
         self.file_list.max_entries = max_entries;
     }
 }
