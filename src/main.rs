@@ -12,10 +12,10 @@ fn main() -> Result<()> {
         stdout().execute(LeaveAlternateScreen);
         println!("{}", e)
     }));
-
+    
     let terminal = tui::init()?;
     let mut browser = Browser::init(terminal)?;
-
+    
     browser.run()?;
 
     tui::restore()?;

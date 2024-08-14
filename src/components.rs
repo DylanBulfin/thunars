@@ -137,10 +137,53 @@ impl Widget for Controls {
 }
 
 #[derive(Clone)]
+pub struct Finder {
+    visible: bool,
+    text: String,
+    selected: usize,
+    max_entries: usize,
+    files: Vec<String>,
+}
+
+impl Widget for Finder {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        let header_area = Rect::new(area.x, area.y, area.width, 3);
+        let content_area = Rect::new(area.x, area.y + 3, area.width, area.height - 1);
+
+        let header_text = Text::from(self.text);
+        let header_block = Block::bordered();
+
+        let text = Text::from(
+            self.files
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    if i == self.selected {
+                        Line::from(s.as_str().black().on_white())
+                    } else {
+                        Line::from(s.as_str())
+                    }
+                })
+                .collect::<Vec<_>>(),
+        );
+        let block = Block::bordered();
+
+        Paragraph::new(header_text)
+            .block(header_block)
+            .render(header_area, buf);
+        Paragraph::new(text).block(block).render(content_area, buf);
+    }
+}
+
+#[derive(Clone)]
 pub struct Window {
     file_list: FileList,
     curr_dir: CurrDirectory,
     controls: Controls,
+    finder: Finder,
 }
 
 impl Window {
@@ -162,10 +205,19 @@ impl Window {
 
         let controls = Controls { visible: true };
 
+        let finder = Finder {
+            visible: false,
+            selected: 0,
+            max_entries: 0,
+            text: String::new(),
+            files: Vec::new(),
+        };
+
         Self {
             file_list,
             curr_dir,
             controls,
+            finder,
         }
     }
 
@@ -226,6 +278,46 @@ impl Window {
             .expect("Unable to find hint")
     }
 
+    pub fn finder_mode(&mut self, on: bool) {
+        if on {
+            self.file_list.visible = false;
+            self.controls.visible = false;
+            self.curr_dir.visible = false;
+            self.finder.visible = true;
+        } else {
+            self.file_list.visible = true;
+            self.controls.visible = true;
+            self.curr_dir.visible = true;
+            self.finder.visible = false;
+        }
+    }
+
+    pub fn finder_text(&self) -> String {
+        self.finder.text.clone()
+    }
+
+    pub fn set_finder_text(&mut self, text: String) {
+        self.finder.text = text
+    }
+
+    pub fn update_finder_files(&mut self, files: Vec<String>) {
+        self.finder.files = files
+    }
+
+    pub fn scroll_finder(&mut self, down: bool) {
+        if down {
+            if self.finder.selected < self.finder.max_entries - 1 {
+                self.finder.selected += 1;
+            }
+        } else {
+            self.finder.selected = self.finder.selected.saturating_sub(1);
+        }
+    }
+
+    pub fn finder_selection(&self) -> &'_ String {
+        &self.finder.files[self.finder.selected]
+    }
+
     pub fn get_curr_entry(&mut self) -> String {
         self.file_list.files[self.file_list.selected].clone()
     }
@@ -238,8 +330,16 @@ impl Window {
         self.file_list.files = files;
     }
 
-    pub fn update_max_entries(&mut self, max_entries: usize) {
+    pub fn set_max_entries(&mut self, max_entries: usize) {
         self.file_list.max_entries = max_entries;
+    }
+
+    pub fn finder_max_entries(&self) -> usize {
+        self.finder.max_entries
+    }
+
+    pub fn set_finder_max_entries(&mut self, max_entries: usize) {
+        self.finder.max_entries = max_entries
     }
 }
 
@@ -252,6 +352,8 @@ impl Widget for Window {
         let fl_area = Rect::new(0, 3, area.width, area.height - 8);
         let ct_area = Rect::new(0, area.height - 5, area.width, 5);
 
+        let fd_area = Rect::new(area.width / 8, 0, 3 * area.width / 4, area.height);
+
         if self.file_list.visible {
             self.file_list.render(fl_area, buf);
         }
@@ -261,7 +363,11 @@ impl Widget for Window {
         }
 
         if self.controls.visible {
-            self.controls.render(ct_area, buf)
+            self.controls.render(ct_area, buf);
+        }
+
+        if self.finder.visible {
+            self.finder.render(fd_area, buf);
         }
     }
 }

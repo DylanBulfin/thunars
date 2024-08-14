@@ -1,4 +1,5 @@
 use std::{
+    env::current_dir,
     fs::DirEntry,
     ops::Add,
     path::{Path, PathBuf},
@@ -7,15 +8,17 @@ use std::{
 
 use crate::{
     commands::FileListCommand,
-    components::{FileList, Window, TOTAL_USED_LINES},
+    components::{FileList, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
     tui::Tui,
     Result,
 };
+use ignore::Walk;
 use ratatui::{
-    crossterm::event::{self, KeyCode, KeyEvent, KeyEventKind},
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::Rect,
     widgets::{self, Widget},
 };
+use skim::prelude::SkimOptionsBuilder;
 
 pub struct Browser {
     window: Window,
@@ -57,7 +60,9 @@ impl Browser {
         self.terminal.draw(|f| {
             f.render_widget(self.window.clone(), f.area());
             self.window
-                .update_max_entries((f.area().height - TOTAL_USED_LINES) as usize);
+                .set_max_entries((f.area().height - TOTAL_USED_LINES) as usize);
+            self.window
+                .set_finder_max_entries((f.area().height - CURR_DIR_LINES - BLOCK_LINES) as usize);
         })?;
 
         Ok(())
@@ -84,13 +89,14 @@ impl Browser {
     }
 
     fn change_directory(&mut self, new_dir: PathBuf) -> Result<()> {
-        self.curr_dir = new_dir.canonicalize().expect("Trying to cd to non-existent directory");
-        
-        let mut sorted_files =fetch_files(self.curr_dir.as_path())?;
+        self.curr_dir = new_dir
+            .canonicalize()
+            .expect("Trying to cd to non-existent directory");
+
+        let mut sorted_files = fetch_files(self.curr_dir.as_path())?;
         sorted_files.sort();
 
-        self.window
-            .update_files(sorted_files);
+        self.window.update_files(sorted_files);
         self.window
             .update_cwd(self.curr_dir.to_string_lossy().to_string());
 
@@ -113,6 +119,8 @@ impl Browser {
                         FileListCommand::EntryScroll(false)
                     } else if c == 'f' {
                         FileListCommand::HintMode
+                    } else if c == '/' {
+                        FileListCommand::FinderMode
                     } else {
                         FileListCommand::None
                     }
@@ -132,7 +140,7 @@ impl Browser {
         loop {
             if event::poll(Duration::from_millis(16))? {
                 match event::read()? {
-                    event::Event::Key(ke) => {
+                    Event::Key(ke) => {
                         if ke.kind == KeyEventKind::Press {
                             match ke.code {
                                 KeyCode::Esc => break,
@@ -156,8 +164,74 @@ impl Browser {
         if self.window.valid_hint(&hint) {
             self.window.jump_hint(hint)
         }
-        
+
         self.window.hint_mode(false);
+
+        Ok(())
+    }
+
+    fn find(&self, text: String) -> Vec<String> {
+        // let options = SkimOptionsBuilder::default().build().unwrap();
+        // let items = 
+
+
+        let path = current_dir().expect("Can't open current directory?");
+
+        Walk::new(PathBuf::from(path))
+            .map(|r| {
+                r.expect("Failed to process file")
+                    .path()
+                    .to_str()
+                    .expect("Unable to read file name")
+                    .to_string()
+            })
+            .filter(|s| s.contains(&text))
+            .take(self.window.finder_max_entries())
+            .collect()
+    }
+
+    fn finder_mode(&mut self) -> Result<()> {
+        self.window.finder_mode(true);
+
+        loop {
+            if event::poll(Duration::from_millis(16))? {
+                match event::read()? {
+                    Event::Key(ke) => {
+                        if ke.kind == KeyEventKind::Press {
+                            match ke.code {
+                                KeyCode::Esc => break,
+                                KeyCode::Char(c) => {
+                                    let mut text = self.window.finder_text();
+                                    text.push(c);
+                                    self.window.update_finder_files(self.find(text.clone()));
+                                    self.window.set_finder_text(text);
+                                }
+                                KeyCode::Backspace => {
+                                    let mut text = self.window.finder_text();
+                                    if text.len() > 0 {
+                                        text.remove(text.len() - 1);
+                                        self.window.update_finder_files(self.find(text.clone()));
+                                        self.window.set_finder_text(text);
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    self.change_directory(self.window.finder_selection().into())?;
+                                    break;
+                                }
+                                KeyCode::Down | KeyCode::Tab => self.window.scroll_finder(true),
+                                KeyCode::Up | KeyCode::BackTab => self.window.scroll_finder(false),
+                                _ => (),
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
+            self.draw()?
+        }
+
+        self.window.finder_mode(false);
 
         Ok(())
     }
@@ -177,7 +251,8 @@ impl Browser {
             }
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
-            _ => (),
+            FileListCommand::FinderMode => self.finder_mode()?,
+            FileListCommand::None => (),
         };
 
         Ok(())
