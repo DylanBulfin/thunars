@@ -1,9 +1,5 @@
 use std::{
-    env::current_dir,
-    fs::DirEntry,
-    ops::Add,
-    path::{Path, PathBuf},
-    time::Duration,
+    env::current_dir, fs::DirEntry, io::Cursor, ops::Add, path::{Path, PathBuf}, time::Duration
 };
 
 use crate::{
@@ -18,7 +14,7 @@ use ratatui::{
     layout::Rect,
     widgets::{self, Widget},
 };
-use skim::prelude::SkimOptionsBuilder;
+use skim::{prelude::{Receiver, SkimOptionsBuilder}, Skim, SkimOptions};
 
 pub struct Browser {
     window: Window,
@@ -171,23 +167,19 @@ impl Browser {
     }
 
     fn find(&self, text: String) -> Vec<String> {
-        // let options = SkimOptionsBuilder::default().build().unwrap();
-        // let items = 
-
+        let options = SkimOptions::default();
 
         let path = current_dir().expect("Can't open current directory?");
-
-        Walk::new(PathBuf::from(path))
+        
+        let items = Walk::new(PathBuf::from(path))
             .map(|r| {
                 r.expect("Failed to process file")
                     .path()
                     .to_str()
                     .expect("Unable to read file name")
-                    .to_string()
-            })
-            .filter(|s| s.contains(&text))
-            .take(self.window.finder_max_entries())
-            .collect()
+            }).collect();
+        
+        let selected = Skim::run_with(&options, Some(items));
     }
 
     fn finder_mode(&mut self) -> Result<()> {
