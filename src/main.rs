@@ -8,8 +8,8 @@ use thunars::{browser::Browser, tui, Result};
 
 fn main() -> Result<()> {
     std::panic::set_hook(Box::new(|e| {
-        disable_raw_mode();
-        stdout().execute(LeaveAlternateScreen);
+        disable_raw_mode().unwrap();
+        stdout().execute(LeaveAlternateScreen).unwrap();
         println!("{}", e)
     }));
     

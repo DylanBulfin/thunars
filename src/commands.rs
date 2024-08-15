@@ -4,7 +4,7 @@ pub enum FileListCommand {
     WindowScroll(bool),  // true if down scroll
     SelectEntry(String), // Selected entry (doesn't distinguish between dirs/files)
     HintMode,
-    FinderMode,
+    FinderMode(bool),    // true if zoxide search
 
     Exit,
     

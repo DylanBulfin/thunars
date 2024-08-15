@@ -1,20 +1,19 @@
 use std::{
-    env::current_dir, fs::DirEntry, io::Cursor, ops::Add, path::{Path, PathBuf}, time::Duration
+    env::current_dir,
+    io::Write,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::Duration,
 };
 
 use crate::{
     commands::FileListCommand,
-    components::{FileList, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
+    components::{Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
     tui::Tui,
     Result,
 };
 use ignore::Walk;
-use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-    layout::Rect,
-    widgets::{self, Widget},
-};
-use skim::{prelude::{Receiver, SkimOptionsBuilder}, Skim, SkimOptions};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 pub struct Browser {
     window: Window,
@@ -116,7 +115,9 @@ impl Browser {
                     } else if c == 'f' {
                         FileListCommand::HintMode
                     } else if c == '/' {
-                        FileListCommand::FinderMode
+                        FileListCommand::FinderMode(false)
+                    } else if c == 'z' {
+                        FileListCommand::FinderMode(true)
                     } else {
                         FileListCommand::None
                     }
@@ -166,24 +167,70 @@ impl Browser {
         Ok(())
     }
 
-    fn find(&self, text: String) -> Vec<String> {
-        let options = SkimOptions::default();
+    fn find(&self, text: String, zoxide: bool) -> Result<Vec<String>> {
+        if zoxide {
+            let command = Command::new("zoxide")
+                .arg("query")
+                .arg("--list")
+                .arg(text)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .spawn()?;
 
-        let path = current_dir().expect("Can't open current directory?");
-        
-        let items = Walk::new(PathBuf::from(path))
-            .map(|r| {
-                r.expect("Failed to process file")
-                    .path()
-                    .to_str()
-                    .expect("Unable to read file name")
-            }).collect();
-        
-        let selected = Skim::run_with(&options, Some(items));
+            Ok(String::from_utf8(command.wait_with_output()?.stdout)
+                .expect("Couldn't read zoxide output")
+                .lines()
+                .take(self.window.finder_max_entries())
+                .map(Into::into)
+                .collect())
+        } else {
+            let path = current_dir().expect("Unable to access current dir");
+
+            let items = Walk::new(PathBuf::from(&path))
+                .map(|r| {
+                    r.expect("Failed to process file")
+                        .into_path()
+                        .strip_prefix(&path)
+                        .expect("Found file not in curr directory")
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .filter(|i| i.len() > 0) // Walk has directory itself as member, filter that out
+                .collect::<Vec<_>>();
+
+            if text.len() == 0 {
+                return Ok(items);
+            }
+
+            let mut command = Command::new("fzf")
+                .arg("-f")
+                .arg(&text)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()?;
+
+            for i in items {
+                let stdin = command
+                    .stdin
+                    .as_mut()
+                    .expect("Unable to access stdin for fzf");
+                stdin.write_fmt(format_args!("{}\n", i))?;
+                stdin.flush()?;
+            }
+
+            Ok(String::from_utf8(command.wait_with_output()?.stdout)
+                .expect("Unable to read fzf output")
+                .lines()
+                .take(self.window.finder_max_entries())
+                .map(Into::into)
+                .collect())
+        }
     }
 
-    fn finder_mode(&mut self) -> Result<()> {
+    fn finder_mode(&mut self, zoxide: bool) -> Result<()> {
         self.window.finder_mode(true);
+        self.window
+            .update_finder_files(self.find(String::new(), zoxide)?);
 
         loop {
             if event::poll(Duration::from_millis(16))? {
@@ -195,14 +242,16 @@ impl Browser {
                                 KeyCode::Char(c) => {
                                     let mut text = self.window.finder_text();
                                     text.push(c);
-                                    self.window.update_finder_files(self.find(text.clone()));
+                                    self.window
+                                        .update_finder_files(self.find(text.clone(), zoxide)?);
                                     self.window.set_finder_text(text);
                                 }
                                 KeyCode::Backspace => {
                                     let mut text = self.window.finder_text();
                                     if text.len() > 0 {
                                         text.remove(text.len() - 1);
-                                        self.window.update_finder_files(self.find(text.clone()));
+                                        self.window
+                                            .update_finder_files(self.find(text.clone(), zoxide)?);
                                         self.window.set_finder_text(text);
                                     }
                                 }
@@ -224,6 +273,9 @@ impl Browser {
         }
 
         self.window.finder_mode(false);
+        self.window.update_finder_files(Vec::new());
+        self.window.set_finder_text(String::new());
+        self.window.finder_reset();
 
         Ok(())
     }
@@ -243,7 +295,7 @@ impl Browser {
             }
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
-            FileListCommand::FinderMode => self.finder_mode()?,
+            FileListCommand::FinderMode(z) => self.finder_mode(z)?,
             FileListCommand::None => (),
         };
 

@@ -292,6 +292,12 @@ impl Window {
         }
     }
 
+    pub fn finder_reset(&mut self) {
+        self.finder.selected = 0;
+        self.finder.files = Vec::new();
+        self.finder.text = String::new();
+    }
+
     pub fn finder_text(&self) -> String {
         self.finder.text.clone()
     }
@@ -301,7 +307,11 @@ impl Window {
     }
 
     pub fn update_finder_files(&mut self, files: Vec<String>) {
-        self.finder.files = files
+        self.finder.files = files;
+
+        if self.finder.selected != 0 && self.finder.selected >= self.finder.files.len() {
+            self.finder.selected = self.finder.files.len().saturating_sub(1);
+        }
     }
 
     pub fn scroll_finder(&mut self, down: bool) {
