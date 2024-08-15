@@ -1,5 +1,5 @@
 use std::{
-    env::current_dir,
+    env::{current_dir, set_current_dir},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -55,8 +55,10 @@ impl Browser {
         self.terminal.draw(|f| {
             f.render_widget(self.window.clone(), f.area());
             self.window
+                .file_list
                 .set_max_entries((f.area().height - TOTAL_USED_LINES) as usize);
             self.window
+                .finder
                 .set_finder_max_entries((f.area().height - CURR_DIR_LINES - BLOCK_LINES) as usize);
         })?;
 
@@ -88,12 +90,23 @@ impl Browser {
             .canonicalize()
             .expect("Trying to cd to non-existent directory");
 
+        set_current_dir(self.curr_dir.as_path()).expect("Unable to change working directory");
+
         let mut sorted_files = fetch_files(self.curr_dir.as_path())?;
         sorted_files.sort();
 
-        self.window.update_files(sorted_files);
+        self.window.file_list.update_files(sorted_files);
         self.window
+            .curr_dir
             .update_cwd(self.curr_dir.to_string_lossy().to_string());
+
+        Ok(())
+    }
+
+    fn open_file(&mut self, file: PathBuf) -> Result<()> {
+        let program = "code";
+
+        Command::new(program).arg(file).spawn()?;
 
         Ok(())
     }
@@ -122,7 +135,9 @@ impl Browser {
                         FileListCommand::None
                     }
                 }
-                KeyCode::Enter => FileListCommand::SelectEntry(self.window.get_curr_entry()),
+                KeyCode::Enter => {
+                    FileListCommand::SelectEntry(self.window.file_list.get_curr_entry().into())
+                }
                 _ => FileListCommand::None,
             }
         } else {
@@ -143,7 +158,7 @@ impl Browser {
                                 KeyCode::Esc => break,
                                 KeyCode::Char(c) => {
                                     hint.push(c);
-                                    if self.window.valid_hint(&hint) {
+                                    if self.window.file_list.valid_hint(&hint) {
                                         break;
                                     }
                                 }
@@ -158,11 +173,21 @@ impl Browser {
             self.draw()?;
         }
 
-        if self.window.valid_hint(&hint) {
-            self.window.jump_hint(hint)
+        if self.window.file_list.valid_hint(&hint) {
+            self.window.file_list.jump_hint(hint)
         }
 
         self.window.hint_mode(false);
+
+        Ok(())
+    }
+
+    fn open_entry(&mut self, entry: PathBuf) -> Result<()> {
+        if entry.is_dir() {
+            self.change_directory(entry)?;
+        } else {
+            self.open_file(entry)?;
+        }
 
         Ok(())
     }
@@ -180,7 +205,7 @@ impl Browser {
             Ok(String::from_utf8(command.wait_with_output()?.stdout)
                 .expect("Couldn't read zoxide output")
                 .lines()
-                .take(self.window.finder_max_entries())
+                .take(self.window.finder.finder_max_entries())
                 .map(Into::into)
                 .collect())
         } else {
@@ -221,7 +246,7 @@ impl Browser {
             Ok(String::from_utf8(command.wait_with_output()?.stdout)
                 .expect("Unable to read fzf output")
                 .lines()
-                .take(self.window.finder_max_entries())
+                .take(self.window.finder.finder_max_entries())
                 .map(Into::into)
                 .collect())
         }
@@ -230,6 +255,7 @@ impl Browser {
     fn finder_mode(&mut self, zoxide: bool) -> Result<()> {
         self.window.finder_mode(true);
         self.window
+            .finder
             .update_finder_files(self.find(String::new(), zoxide)?);
 
         loop {
@@ -240,27 +266,33 @@ impl Browser {
                             match ke.code {
                                 KeyCode::Esc => break,
                                 KeyCode::Char(c) => {
-                                    let mut text = self.window.finder_text();
+                                    let mut text = self.window.finder.finder_text();
                                     text.push(c);
                                     self.window
+                                        .finder
                                         .update_finder_files(self.find(text.clone(), zoxide)?);
-                                    self.window.set_finder_text(text);
+                                    self.window.finder.set_finder_text(text);
                                 }
                                 KeyCode::Backspace => {
-                                    let mut text = self.window.finder_text();
+                                    let mut text = self.window.finder.finder_text();
                                     if text.len() > 0 {
                                         text.remove(text.len() - 1);
                                         self.window
+                                            .finder
                                             .update_finder_files(self.find(text.clone(), zoxide)?);
-                                        self.window.set_finder_text(text);
+                                        self.window.finder.set_finder_text(text);
                                     }
                                 }
                                 KeyCode::Enter => {
-                                    self.change_directory(self.window.finder_selection().into())?;
+                                    self.open_entry(self.window.finder.finder_selection().into())?;
                                     break;
                                 }
-                                KeyCode::Down | KeyCode::Tab => self.window.scroll_finder(true),
-                                KeyCode::Up | KeyCode::BackTab => self.window.scroll_finder(false),
+                                KeyCode::Down | KeyCode::Tab => {
+                                    self.window.finder.scroll_finder(true)
+                                }
+                                KeyCode::Up | KeyCode::BackTab => {
+                                    self.window.finder.scroll_finder(false)
+                                }
                                 _ => (),
                             }
                         }
@@ -273,26 +305,18 @@ impl Browser {
         }
 
         self.window.finder_mode(false);
-        self.window.update_finder_files(Vec::new());
-        self.window.set_finder_text(String::new());
-        self.window.finder_reset();
+        self.window.finder.update_finder_files(Vec::new());
+        self.window.finder.set_finder_text(String::new());
+        self.window.finder.finder_reset();
 
         Ok(())
     }
 
     fn execute_command(&mut self, comm: FileListCommand) -> Result<()> {
         match comm {
-            FileListCommand::EntryScroll(d) => self.window.scroll_entry(d),
-            FileListCommand::WindowScroll(d) => self.window.scroll_list(d),
-            FileListCommand::SelectEntry(e) => {
-                let mut new_path = self.curr_dir.clone();
-                new_path.push(e);
-                if new_path.is_dir() {
-                    self.change_directory(new_path)?;
-                } else if new_path.is_file() {
-                    unimplemented!()
-                }
-            }
+            FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(d),
+            FileListCommand::WindowScroll(d) => self.window.file_list.scroll_list(d),
+            FileListCommand::SelectEntry(p) => self.open_entry(p)?,
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
             FileListCommand::FinderMode(z) => self.finder_mode(z)?,

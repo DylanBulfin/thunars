@@ -27,27 +27,89 @@ pub struct FileList {
     visible: bool,
 }
 
-fn initialize_hints() -> BiHashMap<usize, String> {
-    let one_letter = ["p", "l", "f", "u", "w", "y", "q", ";"].map(|s| s.to_string());
+impl FileList {
+    fn initialize_hints() -> BiHashMap<usize, String> {
+        let one_letter = ["p", "l", "f", "u", "w", "y", "q", ";"].map(|s| s.to_string());
 
-    let first_options = ["t", "n", "s", "e", "r", "i", "a", "o"];
-    let second_options = [
-        "t", "n", "s", "e", "r", "i", "a", "o", "p", "l", "f", "u", "w", "y", "q", ";",
-    ];
-    let two_letters = first_options
-        .into_iter()
-        .flat_map(|c1| second_options.into_iter().map(|c2| c1.to_string() + c2))
-        .collect::<Vec<_>>();
+        let first_options = ["t", "n", "s", "e", "r", "i", "a", "o"];
+        let second_options = [
+            "t", "n", "s", "e", "r", "i", "a", "o", "p", "l", "f", "u", "w", "y", "q", ";",
+        ];
+        let two_letters = first_options
+            .into_iter()
+            .flat_map(|c1| second_options.into_iter().map(|c2| c1.to_string() + c2))
+            .collect::<Vec<_>>();
 
-    let mut hints = BiHashMap::new();
-    for (i, o) in one_letter.iter().enumerate() {
-        hints.insert(i, o.to_string());
+        let mut hints = BiHashMap::new();
+        for (i, o) in one_letter.iter().enumerate() {
+            hints.insert(i, o.to_string());
+        }
+        for (i, t) in two_letters.into_iter().enumerate() {
+            hints.insert(i + one_letter.len(), t);
+        }
+
+        hints
     }
-    for (i, t) in two_letters.into_iter().enumerate() {
-        hints.insert(i + one_letter.len(), t);
+
+    pub fn update_files(&mut self, files: Vec<String>) {
+        self.files = files;
+        self.selected = 0;
+        self.scroll = 0;
     }
 
-    hints
+    pub fn set_max_entries(&mut self, max_entries: usize) {
+        self.max_entries = max_entries;
+    }
+
+    pub fn scroll_list(&mut self, down: bool) {
+        if down {
+            if self.scroll < self.files.len().saturating_sub(self.max_entries) {
+                self.scroll += 1;
+            }
+        } else {
+            self.scroll = self.scroll.saturating_sub(1);
+        }
+    }
+
+    pub fn scroll_entry(&mut self, down: bool) {
+        if down {
+            if self.scroll + self.selected >= self.files.len() - 1 {
+                return;
+            }
+
+            if self.selected >= self.max_entries - 1 {
+                self.scroll += self.selected + 1 - (self.max_entries - 1);
+                self.selected = self.max_entries - 1;
+            } else {
+                self.selected += 1;
+            }
+        } else {
+            if self.selected == 0 && self.scroll != 0 {
+                self.scroll -= 1;
+            } else {
+                self.selected = self.selected.saturating_sub(1);
+            }
+        }
+    }
+
+    fn hint_mode(&mut self, on: bool) {
+        self.hint_mode = on;
+    }
+
+    pub fn valid_hint(&mut self, hint: &String) -> bool {
+        self.hint_choices.right_values().any(|s| s == hint)
+    }
+
+    pub fn jump_hint(&mut self, hint: String) {
+        self.selected = *self
+            .hint_choices
+            .get_by_right(&hint)
+            .expect("Unable to find hint")
+    }
+
+    pub fn get_curr_entry(&mut self) -> String {
+        self.files[self.selected].clone()
+    }
 }
 
 impl Widget for FileList {
@@ -105,6 +167,12 @@ pub struct CurrDirectory {
     visible: bool,
 }
 
+impl CurrDirectory {
+    pub fn update_cwd(&mut self, dir: String) {
+        self.curr_directory = dir
+    }
+}
+
 impl Widget for CurrDirectory {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
@@ -145,17 +213,64 @@ pub struct Finder {
     files: Vec<String>,
 }
 
+impl Finder {
+    pub fn finder_reset(&mut self) {
+        self.selected = 0;
+        self.files = Vec::new();
+        self.text = String::new();
+    }
+
+    pub fn finder_text(&self) -> String {
+        self.text.clone()
+    }
+
+    pub fn set_finder_text(&mut self, text: String) {
+        self.text = text
+    }
+
+    pub fn update_finder_files(&mut self, files: Vec<String>) {
+        self.files = files;
+        self.files.truncate(self.max_entries);
+
+        if self.selected != 0 && self.selected >= self.files.len() {
+            self.selected = self.files.len().saturating_sub(1);
+        }
+    }
+
+    pub fn scroll_finder(&mut self, down: bool) {
+        if down {
+            if self.selected < self.max_entries - 1 {
+                self.selected += 1;
+            }
+        } else {
+            self.selected = self.selected.saturating_sub(1);
+        }
+    }
+
+    pub fn finder_selection(&self) -> &'_ String {
+        &self.files[self.selected]
+    }
+
+    pub fn finder_max_entries(&self) -> usize {
+        self.max_entries
+    }
+
+    pub fn set_finder_max_entries(&mut self, max_entries: usize) {
+        self.max_entries = max_entries
+    }
+}
+
 impl Widget for Finder {
-    fn render(self, area: Rect, buf: &mut Buffer)
+    fn render(mut self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
         let header_area = Rect::new(area.x, area.y, area.width, 3);
-        let content_area = Rect::new(area.x, area.y + 3, area.width, area.height - 1);
+        let content_area = Rect::new(area.x, area.y + 3, area.width, area.height - 3);
 
         let header_text = Text::from(self.text);
         let header_block = Block::bordered();
-
+        
         let text = Text::from(
             self.files
                 .iter()
@@ -180,10 +295,10 @@ impl Widget for Finder {
 
 #[derive(Clone)]
 pub struct Window {
-    file_list: FileList,
-    curr_dir: CurrDirectory,
-    controls: Controls,
-    finder: Finder,
+    pub(crate) file_list: FileList,
+    pub(crate) curr_dir: CurrDirectory,
+    pub(crate) controls: Controls,
+    pub(crate) finder: Finder,
 }
 
 impl Window {
@@ -194,7 +309,7 @@ impl Window {
             selected: 0,
             max_entries: 0,
             hint_mode: false,
-            hint_choices: initialize_hints(),
+            hint_choices: FileList::initialize_hints(),
             visible: true,
         };
 
@@ -221,61 +336,8 @@ impl Window {
         }
     }
 
-    pub fn scroll_list(&mut self, down: bool) {
-        if down {
-            if self.file_list.scroll
-                < self
-                    .file_list
-                    .files
-                    .len()
-                    .saturating_sub(self.file_list.max_entries)
-            {
-                self.file_list.scroll += 1;
-            }
-        } else {
-            self.file_list.scroll = self.file_list.scroll.saturating_sub(1);
-        }
-    }
-
-    pub fn scroll_entry(&mut self, down: bool) {
-        if down {
-            if self.file_list.scroll + self.file_list.selected >= self.file_list.files.len() - 1 {
-                return;
-            }
-
-            if self.file_list.selected >= self.file_list.max_entries - 1 {
-                self.file_list.scroll +=
-                    self.file_list.selected + 1 - (self.file_list.max_entries - 1);
-                self.file_list.selected = self.file_list.max_entries - 1;
-            } else {
-                self.file_list.selected += 1;
-            }
-        } else {
-            if self.file_list.selected == 0 && self.file_list.scroll != 0 {
-                self.file_list.scroll -= 1;
-            } else {
-                self.file_list.selected = self.file_list.selected.saturating_sub(1);
-            }
-        }
-    }
-
     pub fn hint_mode(&mut self, on: bool) {
-        self.file_list.hint_mode = on;
-    }
-
-    pub fn valid_hint(&mut self, hint: &String) -> bool {
-        self.file_list
-            .hint_choices
-            .right_values()
-            .any(|s| s == hint)
-    }
-
-    pub fn jump_hint(&mut self, hint: String) {
-        self.file_list.selected = *self
-            .file_list
-            .hint_choices
-            .get_by_right(&hint)
-            .expect("Unable to find hint")
+        self.file_list.hint_mode(on);
     }
 
     pub fn finder_mode(&mut self, on: bool) {
@@ -290,66 +352,6 @@ impl Window {
             self.curr_dir.visible = true;
             self.finder.visible = false;
         }
-    }
-
-    pub fn finder_reset(&mut self) {
-        self.finder.selected = 0;
-        self.finder.files = Vec::new();
-        self.finder.text = String::new();
-    }
-
-    pub fn finder_text(&self) -> String {
-        self.finder.text.clone()
-    }
-
-    pub fn set_finder_text(&mut self, text: String) {
-        self.finder.text = text
-    }
-
-    pub fn update_finder_files(&mut self, files: Vec<String>) {
-        self.finder.files = files;
-
-        if self.finder.selected != 0 && self.finder.selected >= self.finder.files.len() {
-            self.finder.selected = self.finder.files.len().saturating_sub(1);
-        }
-    }
-
-    pub fn scroll_finder(&mut self, down: bool) {
-        if down {
-            if self.finder.selected < self.finder.max_entries - 1 {
-                self.finder.selected += 1;
-            }
-        } else {
-            self.finder.selected = self.finder.selected.saturating_sub(1);
-        }
-    }
-
-    pub fn finder_selection(&self) -> &'_ String {
-        &self.finder.files[self.finder.selected]
-    }
-
-    pub fn get_curr_entry(&mut self) -> String {
-        self.file_list.files[self.file_list.selected].clone()
-    }
-
-    pub fn update_cwd(&mut self, dir: String) {
-        self.curr_dir.curr_directory = dir
-    }
-
-    pub fn update_files(&mut self, files: Vec<String>) {
-        self.file_list.files = files;
-    }
-
-    pub fn set_max_entries(&mut self, max_entries: usize) {
-        self.file_list.max_entries = max_entries;
-    }
-
-    pub fn finder_max_entries(&self) -> usize {
-        self.finder.max_entries
-    }
-
-    pub fn set_finder_max_entries(&mut self, max_entries: usize) {
-        self.finder.max_entries = max_entries
     }
 }
 
