@@ -1,9 +1,11 @@
+use std::path::PathBuf;
+
 use bimap::BiHashMap;
 use ratatui::{
     prelude::{Buffer, Rect},
     style::Stylize,
     text::{Line, Text},
-    widgets::{block::Title, Block, Paragraph, StatefulWidget, Widget},
+    widgets::{block::Title, Block, Paragraph, Widget},
 };
 
 pub const BLOCK_LINES: u16 = 2;
@@ -107,7 +109,7 @@ impl FileList {
             .expect("Unable to find hint")
     }
 
-    pub fn get_curr_entry(&mut self) -> String {
+    pub fn curr_entry(&self) -> String {
         self.files[self.selected].clone()
     }
 }
@@ -214,21 +216,21 @@ pub struct Finder {
 }
 
 impl Finder {
-    pub fn finder_reset(&mut self) {
+    pub fn reset(&mut self) {
         self.selected = 0;
         self.files = Vec::new();
         self.text = String::new();
     }
 
-    pub fn finder_text(&self) -> String {
+    pub fn text(&self) -> String {
         self.text.clone()
     }
 
-    pub fn set_finder_text(&mut self, text: String) {
+    pub fn set_text(&mut self, text: String) {
         self.text = text
     }
 
-    pub fn update_finder_files(&mut self, files: Vec<String>) {
+    pub fn update_files(&mut self, files: Vec<String>) {
         self.files = files;
         self.files.truncate(self.max_entries);
 
@@ -237,7 +239,7 @@ impl Finder {
         }
     }
 
-    pub fn scroll_finder(&mut self, down: bool) {
+    pub fn scroll(&mut self, down: bool) {
         if down {
             if self.selected < self.max_entries - 1 {
                 self.selected += 1;
@@ -247,21 +249,21 @@ impl Finder {
         }
     }
 
-    pub fn finder_selection(&self) -> &'_ String {
+    pub fn selection(&self) -> &'_ String {
         &self.files[self.selected]
     }
 
-    pub fn finder_max_entries(&self) -> usize {
+    pub fn max_entries(&self) -> usize {
         self.max_entries
     }
 
-    pub fn set_finder_max_entries(&mut self, max_entries: usize) {
+    pub fn set_max_entries(&mut self, max_entries: usize) {
         self.max_entries = max_entries
     }
 }
 
 impl Widget for Finder {
-    fn render(mut self, area: Rect, buf: &mut Buffer)
+    fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
@@ -270,7 +272,7 @@ impl Widget for Finder {
 
         let header_text = Text::from(self.text);
         let header_block = Block::bordered();
-        
+
         let text = Text::from(
             self.files
                 .iter()
@@ -294,11 +296,109 @@ impl Widget for Finder {
 }
 
 #[derive(Clone)]
+pub struct ClipboardEntry {
+    file: PathBuf,
+    cut: bool,
+}
+
+impl ClipboardEntry {
+    pub fn new(file: PathBuf, cut: bool) -> Self {
+        Self { file, cut }
+    }
+
+    pub fn fname(&self) -> String {
+        self.file.to_string_lossy().to_string()
+    }
+
+    pub fn format(&self, width: usize) -> String {
+        let fname = self.fname();
+        let fname_len = fname.char_indices().count();
+        let max_width = width - 2 - BLOCK_LINES as usize; // 2 to leave room for mode marker
+
+        let mode = if self.cut { "X" } else { "Y" };
+
+        if fname_len > max_width {
+            let mut chars = fname.chars();
+            for _ in 0..fname_len - max_width + 3 {
+                chars.next();
+            }
+            format!(
+                "...{} {}",
+                chars.collect::<String>(),
+                mode
+            )
+        } else {
+            format!("{:<max_width$} {}", fname, mode)
+        }
+    }
+    
+    pub fn file(&self) -> &PathBuf {
+        &self.file
+    }
+    
+    pub fn cut(&self) -> bool {
+        self.cut
+    }
+}
+
+#[derive(Clone)]
+pub struct Clipboard {
+    visible: bool,
+    files: Vec<ClipboardEntry>,
+    max_entries: usize,
+}
+
+impl Clipboard {
+    pub fn push(&mut self, file: ClipboardEntry) {
+        self.files.push(file);
+    }
+
+    pub fn append(&mut self, mut files: Vec<ClipboardEntry>) {
+        self.files.append(&mut files);
+    }
+
+    pub fn clear(&mut self) {
+        self.files.clear();
+    }
+
+    pub fn get_files(&self) -> &'_ Vec<ClipboardEntry> {
+        &self.files
+    }
+
+    pub fn max_entries(&self) -> usize {
+        self.max_entries
+    }
+
+    pub fn set_max_entries(&mut self, n: usize) {
+        self.max_entries = n;
+    }
+}
+
+impl Widget for Clipboard {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        let title = Title::from("Clipboard");
+        let text = Text::from(
+            self.files
+                .iter()
+                .map(|ce| Line::from(ce.format(area.width as usize)))
+                .collect::<Vec<_>>(),
+        );
+        let block = Block::bordered().title(title);
+
+        Paragraph::new(text).block(block).render(area, buf);
+    }
+}
+
+#[derive(Clone)]
 pub struct Window {
     pub(crate) file_list: FileList,
     pub(crate) curr_dir: CurrDirectory,
     pub(crate) controls: Controls,
     pub(crate) finder: Finder,
+    pub(crate) clipboard: Clipboard,
 }
 
 impl Window {
@@ -328,11 +428,18 @@ impl Window {
             files: Vec::new(),
         };
 
+        let clipboard = Clipboard {
+            visible: true,
+            files: Vec::new(),
+            max_entries: 0,
+        };
+
         Self {
             file_list,
             curr_dir,
             controls,
             finder,
+            clipboard,
         }
     }
 
@@ -345,11 +452,13 @@ impl Window {
             self.file_list.visible = false;
             self.controls.visible = false;
             self.curr_dir.visible = false;
+            self.clipboard.visible = false;
             self.finder.visible = true;
         } else {
             self.file_list.visible = true;
             self.controls.visible = true;
             self.curr_dir.visible = true;
+            self.clipboard.visible = true;
             self.finder.visible = false;
         }
     }
@@ -360,9 +469,15 @@ impl Widget for Window {
     where
         Self: Sized,
     {
-        let cd_area = Rect::new(0, 0, area.width, 3);
-        let fl_area = Rect::new(0, 3, area.width, area.height - 8);
-        let ct_area = Rect::new(0, area.height - 5, area.width, 5);
+        let cd_area = Rect::new(0, 0, 3 * area.width / 4, 3);
+        let fl_area = Rect::new(0, 3, 3 * area.width / 4, area.height - 8);
+        let ct_area = Rect::new(0, area.height - 5, 3 * area.width / 4, 5);
+        let cb_area = Rect::new(
+            3 * area.width / 4,
+            area.height / 2,
+            area.width - 3 * area.width / 4,
+            area.height - area.height / 2,
+        );
 
         let fd_area = Rect::new(area.width / 8, 0, 3 * area.width / 4, area.height);
 
@@ -376,6 +491,10 @@ impl Widget for Window {
 
         if self.controls.visible {
             self.controls.render(ct_area, buf);
+        }
+
+        if self.clipboard.visible {
+            self.clipboard.render(cb_area, buf);
         }
 
         if self.finder.visible {

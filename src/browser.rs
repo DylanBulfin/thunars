@@ -1,5 +1,6 @@
 use std::{
     env::{current_dir, set_current_dir},
+    fs::{self},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -8,7 +9,7 @@ use std::{
 
 use crate::{
     commands::FileListCommand,
-    components::{Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
+    components::{ClipboardEntry, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
     tui::Tui,
     Result,
 };
@@ -32,8 +33,8 @@ fn fetch_files(dir: &Path) -> Result<Vec<String>> {
         })
         .collect::<Vec<_>>();
 
-    files.insert(0, "..".to_string());
     files.insert(0, ".".to_string());
+    files.insert(0, "..".to_string());
 
     Ok(files)
 }
@@ -59,7 +60,10 @@ impl Browser {
                 .set_max_entries((f.area().height - TOTAL_USED_LINES) as usize);
             self.window
                 .finder
-                .set_finder_max_entries((f.area().height - CURR_DIR_LINES - BLOCK_LINES) as usize);
+                .set_max_entries((f.area().height - CURR_DIR_LINES - BLOCK_LINES) as usize);
+            self.window
+                .clipboard
+                .set_max_entries((f.area().height - f.area().height / 2 - BLOCK_LINES) as usize);
         })?;
 
         Ok(())
@@ -131,13 +135,20 @@ impl Browser {
                         FileListCommand::FinderMode(false)
                     } else if c == 'z' {
                         FileListCommand::FinderMode(true)
+                    } else if c == 'y' {
+                        FileListCommand::Yank(false)
+                    } else if c == 'x' {
+                        FileListCommand::Yank(true)
+                    } else if c == 'p' {
+                        FileListCommand::Paste
                     } else {
                         FileListCommand::None
                     }
                 }
-                KeyCode::Enter => {
-                    FileListCommand::SelectEntry(self.window.file_list.get_curr_entry().into())
-                }
+                KeyCode::Enter => FileListCommand::SelectEntry(
+                    self.get_canonical_entry()
+                        .expect("Unable to process selected entry"),
+                ),
                 _ => FileListCommand::None,
             }
         } else {
@@ -205,7 +216,7 @@ impl Browser {
             Ok(String::from_utf8(command.wait_with_output()?.stdout)
                 .expect("Couldn't read zoxide output")
                 .lines()
-                .take(self.window.finder.finder_max_entries())
+                .take(self.window.finder.max_entries())
                 .map(Into::into)
                 .collect())
         } else {
@@ -246,17 +257,61 @@ impl Browser {
             Ok(String::from_utf8(command.wait_with_output()?.stdout)
                 .expect("Unable to read fzf output")
                 .lines()
-                .take(self.window.finder.finder_max_entries())
+                .take(self.window.finder.max_entries())
                 .map(Into::into)
                 .collect())
         }
+    }
+
+    fn get_canonical_entry(&self) -> Result<PathBuf> {
+        let mut dir = current_dir()?;
+        dir.push(PathBuf::from(self.window.file_list.curr_entry()));
+        dir = dir.canonicalize()?;
+
+        Ok(dir)
+    }
+
+    fn yank(&mut self, cut: bool) -> Result<()> {
+        let path = self.get_canonical_entry()?;
+
+        if path.is_dir() {
+            return Ok(());
+        }
+
+        self.window
+            .clipboard
+            .push(ClipboardEntry::new(self.get_canonical_entry()?, cut));
+
+        Ok(())
+    }
+
+    fn paste(&mut self) -> Result<()> {
+        for ce in self.window.clipboard.get_files() {
+            let path = ce.file().canonicalize()?;
+            let mut new_path = self.curr_dir.clone();
+            new_path.push(PathBuf::from(
+                path.file_name().expect("Trying to copy directory"),
+            ));
+
+            fs::copy(&path, new_path)?;
+
+            if ce.cut() {
+                fs::remove_file(path)?;
+            }
+        }
+        
+        // Forces reload of files
+        self.change_directory(self.curr_dir.clone())?;
+
+        self.window.clipboard.clear();
+        Ok(())
     }
 
     fn finder_mode(&mut self, zoxide: bool) -> Result<()> {
         self.window.finder_mode(true);
         self.window
             .finder
-            .update_finder_files(self.find(String::new(), zoxide)?);
+            .update_files(self.find(String::new(), zoxide)?);
 
         loop {
             if event::poll(Duration::from_millis(16))? {
@@ -266,33 +321,29 @@ impl Browser {
                             match ke.code {
                                 KeyCode::Esc => break,
                                 KeyCode::Char(c) => {
-                                    let mut text = self.window.finder.finder_text();
+                                    let mut text = self.window.finder.text();
                                     text.push(c);
                                     self.window
                                         .finder
-                                        .update_finder_files(self.find(text.clone(), zoxide)?);
-                                    self.window.finder.set_finder_text(text);
+                                        .update_files(self.find(text.clone(), zoxide)?);
+                                    self.window.finder.set_text(text);
                                 }
                                 KeyCode::Backspace => {
-                                    let mut text = self.window.finder.finder_text();
+                                    let mut text = self.window.finder.text();
                                     if text.len() > 0 {
                                         text.remove(text.len() - 1);
                                         self.window
                                             .finder
-                                            .update_finder_files(self.find(text.clone(), zoxide)?);
-                                        self.window.finder.set_finder_text(text);
+                                            .update_files(self.find(text.clone(), zoxide)?);
+                                        self.window.finder.set_text(text);
                                     }
                                 }
                                 KeyCode::Enter => {
-                                    self.open_entry(self.window.finder.finder_selection().into())?;
+                                    self.open_entry(self.window.finder.selection().into())?;
                                     break;
                                 }
-                                KeyCode::Down | KeyCode::Tab => {
-                                    self.window.finder.scroll_finder(true)
-                                }
-                                KeyCode::Up | KeyCode::BackTab => {
-                                    self.window.finder.scroll_finder(false)
-                                }
+                                KeyCode::Down | KeyCode::Tab => self.window.finder.scroll(true),
+                                KeyCode::Up | KeyCode::BackTab => self.window.finder.scroll(false),
                                 _ => (),
                             }
                         }
@@ -305,9 +356,9 @@ impl Browser {
         }
 
         self.window.finder_mode(false);
-        self.window.finder.update_finder_files(Vec::new());
-        self.window.finder.set_finder_text(String::new());
-        self.window.finder.finder_reset();
+        self.window.finder.update_files(Vec::new());
+        self.window.finder.set_text(String::new());
+        self.window.finder.reset();
 
         Ok(())
     }
@@ -320,6 +371,8 @@ impl Browser {
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
             FileListCommand::FinderMode(z) => self.finder_mode(z)?,
+            FileListCommand::Yank(c) => self.yank(c)?,
+            FileListCommand::Paste => self.paste()?,
             FileListCommand::None => (),
         };
 
