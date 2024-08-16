@@ -425,7 +425,7 @@ impl Browser {
     }
 
     fn omnibar_mode(&mut self, mode: OmnibarMode) -> Result<()> {
-        self.window.omnibar_mode(true);
+        self.window.omnibar_mode(true, mode);
 
         let mut submit = false;
 
@@ -484,7 +484,7 @@ impl Browser {
         }
 
         self.window.omnibar.set_text(String::new());
-        self.window.omnibar_mode(false);
+        self.window.omnibar_mode(false, mode);
 
         Ok(())
     }

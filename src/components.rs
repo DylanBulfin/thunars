@@ -9,6 +9,8 @@ use ratatui::{
     widgets::{block::Title, Block, Paragraph, Widget},
 };
 
+use crate::commands::OmnibarMode;
+
 pub const BLOCK_LINES: u16 = 2;
 
 pub const CURR_DIR_LINES: u16 = 1;
@@ -429,6 +431,7 @@ impl Widget for Preview {
 pub struct Omnibar {
     visible: bool,
     text: String,
+    mode: OmnibarMode,
 }
 
 impl Omnibar {
@@ -446,7 +449,11 @@ impl Widget for Omnibar {
     where
         Self: Sized,
     {
-        let title = Title::from("Rename");
+        let title = Title::from(match self.mode {
+            OmnibarMode::Rename => "Rename",
+            OmnibarMode::Touch => "New File",
+            OmnibarMode::Mkdir => "New Directory",
+        });
         let text = Text::from(Line::from(self.text));
         let block = Block::bordered().title(title);
 
@@ -501,9 +508,10 @@ impl Window {
             max_lines: 0,
         };
 
-        let rename = Omnibar {
+        let omnibar = Omnibar {
             visible: false,
             text: String::new(),
+            mode: OmnibarMode::Rename,
         };
 
         Self {
@@ -512,7 +520,7 @@ impl Window {
             finder,
             clipboard,
             preview,
-            omnibar: rename,
+            omnibar,
         }
     }
 
@@ -537,7 +545,8 @@ impl Window {
         }
     }
 
-    pub fn omnibar_mode(&mut self, on: bool) {
+    pub fn omnibar_mode(&mut self, on: bool, mode: OmnibarMode) {
+        self.omnibar.mode = mode;
         if on {
             self.file_list.visible = false;
             self.curr_dir.visible = false;
