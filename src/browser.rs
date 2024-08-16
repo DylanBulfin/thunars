@@ -14,13 +14,10 @@ use crate::{
     Result,
 };
 use ignore::Walk;
-use ratatui::{
-    crossterm::{
+use ratatui::crossterm::{
         event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
         style::Color,
-    },
-    Terminal,
-};
+    };
 
 pub struct Browser {
     window: Window,
@@ -259,6 +256,7 @@ impl Browser {
             FileListCommand::OmnibarMode(m) => self.omnibar_mode(*m)?,
             FileListCommand::Yank(c) => self.yank(*c)?,
             FileListCommand::Paste => self.paste()?,
+            FileListCommand::Delete(f) => self.delete(*f)?,
             FileListCommand::Exit => self.exit = true,
             FileListCommand::None | FileListCommand::ExitHint => (), // hint mode handles the latter binding
         };
@@ -266,7 +264,7 @@ impl Browser {
         if command.should_refresh_preview() {
             // May need to clear terminal if artifacts keep happening
             // self.terminal.clear()?;
-            if (self.refresh_preview().is_err()) {
+            if self.refresh_preview().is_err() {
                 self.window.preview.update_lines(Vec::new());
             }
         }
@@ -500,6 +498,21 @@ impl Browser {
         self.window.clipboard.clear();
         Ok(())
     }
+    
+        
+    fn delete(&mut self, force: bool) ->  Result<()> {
+        let path = &self.get_canonical_entry()?;
+
+        if path.is_file() {
+            fs::remove_file(path)?;
+        }
+        if path.is_dir() && force {
+            fs::remove_dir_all(path)?;
+        }
+        
+        Ok(())
+    }
+
 
     fn refresh_preview(&mut self) -> Result<()> {
         let path = PathBuf::from(self.window.file_list.curr_entry()).canonicalize()?;

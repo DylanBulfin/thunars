@@ -22,6 +22,7 @@ pub enum FileListCommand {
     OmnibarMode(OmnibarType),
     Yank(bool), // true if cut
     Paste,
+    Delete(bool), // true if force (meaning it can delete directories)
 
     Exit,
     ExitHint,

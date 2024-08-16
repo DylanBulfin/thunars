@@ -388,7 +388,7 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn update_lines(&mut self, mut lines: Vec<String>) {
+    pub fn update_lines(&mut self, lines: Vec<String>) {
         self.lines = lines
     }
 
