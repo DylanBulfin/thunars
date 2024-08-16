@@ -14,7 +14,7 @@ pub const BLOCK_LINES: u16 = 2;
 pub const CURR_DIR_LINES: u16 = 1;
 pub const CURR_DIR_HEIGHT: u16 = BLOCK_LINES + CURR_DIR_LINES;
 
-pub const RENAME_LINES:u16 = 1;
+pub const RENAME_LINES: u16 = 1;
 pub const RENAME_HEIGHT: u16 = BLOCK_LINES + RENAME_LINES;
 
 pub const CONTROLS_LINES: u16 = 3;
@@ -105,12 +105,10 @@ impl FileList {
             } else {
                 self.selected += 1;
             }
+        } else if self.selected == 0 && self.scroll != 0 {
+            self.scroll -= 1;
         } else {
-            if self.selected == 0 && self.scroll != 0 {
-                self.scroll -= 1;
-            } else {
-                self.selected = self.selected.saturating_sub(1);
-            }
+            self.selected = self.selected.saturating_sub(1);
         }
     }
 
@@ -163,18 +161,13 @@ impl Widget for FileList {
                                     Span::styled(f.name(), Style::new().fg(f.color.into())),
                                 ])
                             }
+                        } else if i == self.selected {
+                            Line::from(vec!["   ".on_black(), f.name.clone().black().on_white()])
                         } else {
-                            if i == self.selected {
-                                Line::from(vec![
-                                    "   ".on_black(),
-                                    f.name.clone().black().on_white(),
-                                ])
-                            } else {
-                                Line::from(vec![
-                                    "   ".on_black(),
-                                    Span::styled(f.name(), Style::new().fg(f.color.into())),
-                                ])
-                            }
+                            Line::from(vec![
+                                "   ".on_black(),
+                                Span::styled(f.name(), Style::new().fg(f.color.into())),
+                            ])
                         }
                     })
                     .collect::<Vec<_>>(),
@@ -543,8 +536,8 @@ impl Window {
             self.finder.visible = false;
         }
     }
-    
-    pub fn omnibar_mode(&mut self, on:bool){
+
+    pub fn omnibar_mode(&mut self, on: bool) {
         if on {
             self.file_list.visible = false;
             self.curr_dir.visible = false;
@@ -552,7 +545,7 @@ impl Window {
             self.preview.visible = false;
             self.finder.visible = false;
             self.omnibar.visible = true;
-        }else{
+        } else {
             self.file_list.visible = true;
             self.curr_dir.visible = true;
             self.clipboard.visible = true;
@@ -588,8 +581,13 @@ impl Widget for Window {
         );
 
         let fd_area = Rect::new(area.width / 8, 0, 3 * area.width / 4, area.height);
-        
-        let rn_area = Rect::new(area.width / 4, area.height/2, area.width/ 2, RENAME_HEIGHT);
+
+        let rn_area = Rect::new(
+            area.width / 4,
+            area.height / 2,
+            area.width / 2,
+            RENAME_HEIGHT,
+        );
 
         if self.file_list.visible {
             self.file_list.render(fl_area, buf);
@@ -610,7 +608,7 @@ impl Widget for Window {
         if self.finder.visible {
             self.finder.render(fd_area, buf);
         }
-        
+
         if self.omnibar.visible {
             self.omnibar.render(rn_area, buf)
         }

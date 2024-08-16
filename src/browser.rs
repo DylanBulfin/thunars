@@ -1,10 +1,9 @@
 use std::{
     env::{current_dir, set_current_dir},
     fs::{self},
-    io::{BufRead, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    str::Lines,
     time::Duration,
 };
 
@@ -44,7 +43,7 @@ fn fetch_files(dir: &Path) -> Result<Vec<File>> {
                 .to_string_lossy()
                 .to_string()
         })
-        .filter(|s| s.len() > 0)
+        .filter(|s| !s.is_empty())
         .map(|d| File::new(d, Color::DarkYellow))
         .collect();
 
@@ -57,7 +56,7 @@ fn fetch_files(dir: &Path) -> Result<Vec<File>> {
                     .to_string_lossy()
                     .to_string()
             })
-            .filter(|s| s.len() > 0)
+            .filter(|s| !s.is_empty())
             .map(|f| File::new(f, Color::Cyan))
             .collect(),
     );
@@ -104,12 +103,9 @@ impl Browser {
     pub fn run(&mut self) -> Result<()> {
         loop {
             if event::poll(Duration::from_millis(16))? {
-                match event::read()? {
-                    event::Event::Key(ke) => {
-                        let command = self.hande_key_event(ke);
-                        self.execute_command(command)?
-                    }
-                    _ => (),
+                if let event::Event::Key(ke) = event::read()? {
+                    let command = self.hande_key_event(ke);
+                    self.execute_command(command)?
                 }
             }
 
@@ -147,7 +143,7 @@ impl Browser {
     }
 
     fn hande_key_event(&mut self, ke: KeyEvent) -> FileListCommand {
-        let command = if ke.kind == KeyEventKind::Press {
+        if ke.kind == KeyEventKind::Press {
             match ke.code {
                 KeyCode::Char(c) => {
                     if c == 'q' {
@@ -190,9 +186,7 @@ impl Browser {
             }
         } else {
             FileListCommand::None
-        };
-
-        command
+        }
     }
 
     fn hint_mode(&mut self) -> Result<()> {
@@ -201,22 +195,19 @@ impl Browser {
 
         loop {
             if event::poll(Duration::from_millis(16))? {
-                match event::read()? {
-                    Event::Key(ke) => {
-                        if ke.kind == KeyEventKind::Press {
-                            match ke.code {
-                                KeyCode::Esc => break,
-                                KeyCode::Char(c) => {
-                                    hint.push(c);
-                                    if self.window.file_list.valid_hint(&hint) {
-                                        break;
-                                    }
+                if let Event::Key(ke) = event::read()? {
+                    if ke.kind == KeyEventKind::Press {
+                        match ke.code {
+                            KeyCode::Esc => break,
+                            KeyCode::Char(c) => {
+                                hint.push(c);
+                                if self.window.file_list.valid_hint(&hint) {
+                                    break;
                                 }
-                                _ => (),
                             }
+                            _ => (),
                         }
                     }
-                    _ => (),
                 }
             }
 
@@ -270,10 +261,10 @@ impl Browser {
                         .to_string_lossy()
                         .to_string()
                 })
-                .filter(|i| i.len() > 0) // Walk has directory itself as member, filter that out
+                .filter(|i| !i.is_empty()) // Walk has directory itself as member, filter that out
                 .collect::<Vec<_>>();
 
-            if text.len() == 0 {
+            if text.is_empty() {
                 return Ok(items);
             }
 
@@ -371,7 +362,7 @@ impl Browser {
         // Processing it like this lets us mostly catch utf-8 issues
         self.window.preview.update_lines(
             String::from_utf8(command.wait_with_output()?.stdout)
-                .unwrap_or(String::new())
+                .unwrap_or_default()
                 .lines()
                 .map(String::from)
                 .collect(),
@@ -388,40 +379,37 @@ impl Browser {
 
         loop {
             if event::poll(Duration::from_millis(16))? {
-                match event::read()? {
-                    Event::Key(ke) => {
-                        if ke.kind == KeyEventKind::Press {
-                            match ke.code {
-                                KeyCode::Esc => break,
-                                KeyCode::Char(c) => {
-                                    let mut text = self.window.finder.text();
-                                    text.push(c);
+                if let Event::Key(ke) = event::read()? {
+                    if ke.kind == KeyEventKind::Press {
+                        match ke.code {
+                            KeyCode::Esc => break,
+                            KeyCode::Char(c) => {
+                                let mut text = self.window.finder.text();
+                                text.push(c);
+                                self.window
+                                    .finder
+                                    .update_files(self.find(text.clone(), zoxide)?);
+                                self.window.finder.set_text(text);
+                            }
+                            KeyCode::Backspace => {
+                                let mut text = self.window.finder.text();
+                                if !text.is_empty() {
+                                    text.remove(text.len() - 1);
                                     self.window
                                         .finder
                                         .update_files(self.find(text.clone(), zoxide)?);
                                     self.window.finder.set_text(text);
                                 }
-                                KeyCode::Backspace => {
-                                    let mut text = self.window.finder.text();
-                                    if text.len() > 0 {
-                                        text.remove(text.len() - 1);
-                                        self.window
-                                            .finder
-                                            .update_files(self.find(text.clone(), zoxide)?);
-                                        self.window.finder.set_text(text);
-                                    }
-                                }
-                                KeyCode::Enter => {
-                                    self.open_entry(self.window.finder.selection().into())?;
-                                    break;
-                                }
-                                KeyCode::Down | KeyCode::Tab => self.window.finder.scroll(true),
-                                KeyCode::Up | KeyCode::BackTab => self.window.finder.scroll(false),
-                                _ => (),
                             }
+                            KeyCode::Enter => {
+                                self.open_entry(self.window.finder.selection().into())?;
+                                break;
+                            }
+                            KeyCode::Down | KeyCode::Tab => self.window.finder.scroll(true),
+                            KeyCode::Up | KeyCode::BackTab => self.window.finder.scroll(false),
+                            _ => (),
                         }
                     }
-                    _ => (),
                 }
             }
 
@@ -443,32 +431,29 @@ impl Browser {
 
         loop {
             if event::poll(Duration::from_millis(16))? {
-                match event::read()? {
-                    Event::Key(ke) => {
-                        if ke.kind == KeyEventKind::Press {
-                            match ke.code {
-                                KeyCode::Backspace => {
-                                    let mut text = self.window.omnibar.text().clone();
-                                    text.truncate(text.len().saturating_sub(1));
+                if let Event::Key(ke) = event::read()? {
+                    if ke.kind == KeyEventKind::Press {
+                        match ke.code {
+                            KeyCode::Backspace => {
+                                let mut text = self.window.omnibar.text().clone();
+                                text.truncate(text.len().saturating_sub(1));
 
-                                    self.window.omnibar.set_text(text);
-                                }
-                                KeyCode::Char(c) => {
-                                    let mut text = self.window.omnibar.text().clone();
-                                    text.push(c);
-
-                                    self.window.omnibar.set_text(text);
-                                }
-                                KeyCode::Esc => break,
-                                KeyCode::Enter => {
-                                    submit = true;
-                                    break;
-                                }
-                                _ => (),
+                                self.window.omnibar.set_text(text);
                             }
+                            KeyCode::Char(c) => {
+                                let mut text = self.window.omnibar.text().clone();
+                                text.push(c);
+
+                                self.window.omnibar.set_text(text);
+                            }
+                            KeyCode::Esc => break,
+                            KeyCode::Enter => {
+                                submit = true;
+                                break;
+                            }
+                            _ => (),
                         }
                     }
-                    _ => (),
                 }
             }
 
@@ -518,10 +503,8 @@ impl Browser {
             FileListCommand::None => (),
         };
 
-        if command.refresh_preview() {
-            if let Err(_) = self.refresh_preview() {
-                self.window.preview.update_lines(Vec::new());
-            }
+        if command.should_refresh_preview() && self.refresh_preview().is_err() {
+            self.window.preview.update_lines(Vec::new());
         }
 
         Ok(())

@@ -24,10 +24,7 @@ pub enum FileListCommand {
 }
 
 impl FileListCommand {
-    pub fn refresh_preview(&self) -> bool {
-        match self {
-            FileListCommand::Exit | FileListCommand::None => false,
-            _ => true,
-        }
+    pub fn should_refresh_preview(&self) -> bool {
+        matches!(self, FileListCommand::Exit | FileListCommand::None)
     }
 }
