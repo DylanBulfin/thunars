@@ -2,9 +2,10 @@ use std::path::PathBuf;
 
 use bimap::BiHashMap;
 use ratatui::{
+    crossterm::style::Color,
     prelude::{Buffer, Rect},
-    style::Stylize,
-    text::{Line, Text},
+    style::{Style, Stylize},
+    text::{Line, Span, Text},
     widgets::{block::Title, Block, Paragraph, Widget},
 };
 
@@ -19,8 +20,24 @@ pub const CONTROLS_HEIGHT: u16 = BLOCK_LINES + CONTROLS_LINES;
 pub const TOTAL_USED_LINES: u16 = BLOCK_LINES + CURR_DIR_HEIGHT + CONTROLS_HEIGHT;
 
 #[derive(Clone)]
+pub struct File {
+    name: String,
+    color: Color,
+}
+
+impl File {
+    pub fn new(name: String, color: Color) -> Self {
+        Self { name, color }
+    }
+
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+}
+
+#[derive(Clone)]
 pub struct FileList {
-    files: Vec<String>,
+    files: Vec<File>,
     scroll: usize,
     selected: usize,
     max_entries: usize,
@@ -53,7 +70,7 @@ impl FileList {
         hints
     }
 
-    pub fn update_files(&mut self, files: Vec<String>) {
+    pub fn update_files(&mut self, files: Vec<File>) {
         self.files = files;
         self.selected = 0;
         self.scroll = 0;
@@ -79,7 +96,7 @@ impl FileList {
                 return;
             }
 
-            if self.selected >= self.max_entries - 1 {
+            if self.max_entries != 0 && self.selected >= self.max_entries - 1 {
                 self.scroll += self.selected + 1 - (self.max_entries - 1);
                 self.selected = self.max_entries - 1;
             } else {
@@ -110,7 +127,7 @@ impl FileList {
     }
 
     pub fn curr_entry(&self) -> String {
-        self.files[self.selected].clone()
+        self.files[self.selected].name.clone()
     }
 }
 
@@ -134,20 +151,26 @@ impl Widget for FileList {
                                 Line::from(vec![
                                     hint.green().on_black(),
                                     "  ".on_black(),
-                                    f.clone().gray().on_black(),
+                                    Span::styled(f.name(), Style::new().fg(f.color.into())),
                                 ])
                             } else {
                                 Line::from(vec![
                                     hint.blue().on_black(),
                                     " ".on_black(),
-                                    f.clone().gray().on_black(),
+                                    Span::styled(f.name(), Style::new().fg(f.color.into())),
                                 ])
                             }
                         } else {
                             if i == self.selected {
-                                Line::from(vec!["   ".on_black(), f.clone().black().on_white()])
+                                Line::from(vec![
+                                    "   ".on_black(),
+                                    f.name.clone().black().on_white(),
+                                ])
                             } else {
-                                Line::from(vec!["   ".on_black(), f.clone().white().on_black()])
+                                Line::from(vec![
+                                    "   ".on_black(),
+                                    Span::styled(f.name(), Style::new().fg(f.color.into())),
+                                ])
                             }
                         }
                     })
@@ -185,24 +208,6 @@ impl Widget for CurrDirectory {
         let block = Block::bordered().title(title);
 
         Paragraph::new(text).block(block).render(area, buf);
-    }
-}
-
-#[derive(Clone)]
-pub struct Controls {
-    visible: bool,
-}
-
-impl Widget for Controls {
-    fn render(self, area: Rect, buf: &mut Buffer)
-    where
-        Self: Sized,
-    {
-        let text = Text::from(vec![Line::from("a".red()), "c".into(), "b".bold().into()]);
-        let title = Title::from("Controls");
-        let block = Block::bordered().title(title);
-
-        Paragraph::new(text).block(block).render(area, buf)
     }
 }
 
@@ -322,20 +327,17 @@ impl ClipboardEntry {
             for _ in 0..fname_len - max_width + 3 {
                 chars.next();
             }
-            format!(
-                "...{} {}",
-                chars.collect::<String>(),
-                mode
-            )
+
+            format!("...{} {}", chars.collect::<String>(), mode)
         } else {
             format!("{:<max_width$} {}", fname, mode)
         }
     }
-    
+
     pub fn file(&self) -> &PathBuf {
         &self.file
     }
-    
+
     pub fn cut(&self) -> bool {
         self.cut
     }
@@ -353,9 +355,9 @@ impl Clipboard {
         self.files.push(file);
     }
 
-    pub fn append(&mut self, mut files: Vec<ClipboardEntry>) {
-        self.files.append(&mut files);
-    }
+    // pub fn append(&mut self, mut files: Vec<ClipboardEntry>) {
+    //     self.files.append(&mut files);
+    // }
 
     pub fn clear(&mut self) {
         self.files.clear();
@@ -363,10 +365,6 @@ impl Clipboard {
 
     pub fn get_files(&self) -> &'_ Vec<ClipboardEntry> {
         &self.files
-    }
-
-    pub fn max_entries(&self) -> usize {
-        self.max_entries
     }
 
     pub fn set_max_entries(&mut self, n: usize) {
@@ -393,16 +391,55 @@ impl Widget for Clipboard {
 }
 
 #[derive(Clone)]
+pub struct Preview {
+    visible: bool,
+    lines: Vec<String>,
+    max_lines: usize,
+}
+
+impl Preview {
+    pub fn update_lines(&mut self, lines: Vec<String>) {
+        self.lines = lines
+    }
+
+    pub fn max_lines(&self) -> usize {
+        self.max_lines
+    }
+
+    pub fn set_max_lines(&mut self, max_lines: usize) {
+        self.max_lines = max_lines
+    }
+}
+
+impl Widget for Preview {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        let title = Title::from("Preview");
+        let text = Text::from(
+            self.lines
+                .iter()
+                .map(|s| Line::from(s.as_str().italic()))
+                .collect::<Vec<_>>(),
+        );
+        let block = Block::bordered().title(title);
+
+        Paragraph::new(text).block(block).render(area, buf);
+    }
+}
+
+#[derive(Clone)]
 pub struct Window {
     pub(crate) file_list: FileList,
     pub(crate) curr_dir: CurrDirectory,
-    pub(crate) controls: Controls,
     pub(crate) finder: Finder,
     pub(crate) clipboard: Clipboard,
+    pub(crate) preview: Preview,
 }
 
 impl Window {
-    pub fn new(files: Vec<String>, starting_dir: String) -> Self {
+    pub fn new(files: Vec<File>, starting_dir: String) -> Self {
         let file_list = FileList {
             files,
             scroll: 0,
@@ -418,8 +455,6 @@ impl Window {
             visible: true,
         };
 
-        let controls = Controls { visible: true };
-
         let finder = Finder {
             visible: false,
             selected: 0,
@@ -434,12 +469,18 @@ impl Window {
             max_entries: 0,
         };
 
+        let preview = Preview {
+            visible: true,
+            lines: Vec::new(),
+            max_lines: 0,
+        };
+
         Self {
             file_list,
             curr_dir,
-            controls,
             finder,
             clipboard,
+            preview,
         }
     }
 
@@ -450,15 +491,15 @@ impl Window {
     pub fn finder_mode(&mut self, on: bool) {
         if on {
             self.file_list.visible = false;
-            self.controls.visible = false;
             self.curr_dir.visible = false;
             self.clipboard.visible = false;
+            self.preview.visible = false;
             self.finder.visible = true;
         } else {
             self.file_list.visible = true;
-            self.controls.visible = true;
             self.curr_dir.visible = true;
             self.clipboard.visible = true;
+            self.preview.visible = true;
             self.finder.visible = false;
         }
     }
@@ -469,14 +510,24 @@ impl Widget for Window {
     where
         Self: Sized,
     {
-        let cd_area = Rect::new(0, 0, 3 * area.width / 4, 3);
-        let fl_area = Rect::new(0, 3, 3 * area.width / 4, area.height - 8);
-        let ct_area = Rect::new(0, area.height - 5, 3 * area.width / 4, 5);
+        let cd_area = Rect::new(0, 0, 3 * area.width / 4, CURR_DIR_HEIGHT);
+        let fl_area = Rect::new(
+            0,
+            CURR_DIR_HEIGHT,
+            3 * area.width / 4,
+            area.height - CURR_DIR_HEIGHT,
+        );
+        let pv_area = Rect::new(
+            3 * area.width / 4,
+            0,
+            area.width - 3 * area.width / 4,
+            area.height - area.height / 3,
+        );
         let cb_area = Rect::new(
             3 * area.width / 4,
-            area.height / 2,
+            area.height - area.height / 3,
             area.width - 3 * area.width / 4,
-            area.height - area.height / 2,
+            area.height / 3,
         );
 
         let fd_area = Rect::new(area.width / 8, 0, 3 * area.width / 4, area.height);
@@ -489,8 +540,8 @@ impl Widget for Window {
             self.curr_dir.render(cd_area, buf);
         }
 
-        if self.controls.visible {
-            self.controls.render(ct_area, buf);
+        if self.preview.visible {
+            self.preview.render(pv_area, buf);
         }
 
         if self.clipboard.visible {

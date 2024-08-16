@@ -15,14 +15,15 @@
 - Fully configurable keybindings (in all modes)
 - Configurable file associations (e.g. open some file types with specific programs)
 - Basic file manipulation support
-    - Cut/Copy files by range or 1 by 1
+    - ~~Cut/Copy files one by one~~
     - Rename files
     - Create directory/empty file
     - Delete file/directory
-- File details panel
+- File details panel (On hold till I figure out a good layout)
+    - Maybe just a 5 line or something thing on the side with the preview panel
+- ~~File previews~~ Basic done
 
 ### Stretch Goals
-- File previews
 - Some way to customize layout
 - Support for populating finder list with arbitrary command instead of just `fzf`/`zoxide`
 - Hints reorder based on selection's proximity to line in question (e.g. shorter hints assigned to closer entries)

@@ -1,7 +1,7 @@
 use std::{
     env::{current_dir, set_current_dir},
     fs::{self},
-    io::Write,
+    io::{BufRead, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::Duration,
@@ -9,12 +9,15 @@ use std::{
 
 use crate::{
     commands::FileListCommand,
-    components::{ClipboardEntry, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
+    components::{ClipboardEntry, File, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
     tui::Tui,
     Result,
 };
 use ignore::Walk;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use ratatui::crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    style::Color,
+};
 
 pub struct Browser {
     window: Window,
@@ -23,20 +26,45 @@ pub struct Browser {
     exit: bool,
 }
 
-fn fetch_files(dir: &Path) -> Result<Vec<String>> {
-    let mut files = std::fs::read_dir(dir)?
-        .map(|d| {
-            d.expect("Unable to fetch files in directory")
-                .file_name()
-                .into_string()
-                .expect("Unable to process filename")
-        })
+fn fetch_files(dir: &Path) -> Result<Vec<File>> {
+    let paths = std::fs::read_dir(dir)?
+        .map(|d| d.expect("Unable to fetch files in directory").path())
         .collect::<Vec<_>>();
 
-    files.insert(0, ".".to_string());
-    files.insert(0, "..".to_string());
+    let (mut dirs, mut files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
+    dirs.sort();
+    files.sort();
 
-    Ok(files)
+    let mut entries: Vec<_> = dirs
+        .into_iter()
+        .map(|p| {
+            p.strip_prefix(dir)
+                .expect("Unable to parse dir")
+                .to_string_lossy()
+                .to_string()
+        })
+        .filter(|s| s.len() > 0)
+        .map(|d| File::new(d, Color::DarkYellow))
+        .collect();
+
+    entries.append(
+        &mut files
+            .into_iter()
+            .map(|p| {
+                p.strip_prefix(dir)
+                    .expect("Unable to parse file")
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .filter(|s| s.len() > 0)
+            .map(|f| File::new(f, Color::Cyan))
+            .collect(),
+    );
+
+    entries.insert(0, File::new(".".to_string(), Color::White));
+    entries.insert(0, File::new("..".to_string(), Color::White));
+
+    Ok(entries)
 }
 
 impl Browser {
@@ -62,8 +90,11 @@ impl Browser {
                 .finder
                 .set_max_entries((f.area().height - CURR_DIR_LINES - BLOCK_LINES) as usize);
             self.window
+                .preview
+                .set_max_lines((f.area().height - f.area().height / 3 - BLOCK_LINES) as usize);
+            self.window
                 .clipboard
-                .set_max_entries((f.area().height - f.area().height / 2 - BLOCK_LINES) as usize);
+                .set_max_entries((f.area().height / 3 - BLOCK_LINES) as usize);
         })?;
 
         Ok(())
@@ -96,8 +127,7 @@ impl Browser {
 
         set_current_dir(self.curr_dir.as_path()).expect("Unable to change working directory");
 
-        let mut sorted_files = fetch_files(self.curr_dir.as_path())?;
-        sorted_files.sort();
+        let sorted_files = fetch_files(self.curr_dir.as_path())?;
 
         self.window.file_list.update_files(sorted_files);
         self.window
@@ -116,7 +146,7 @@ impl Browser {
     }
 
     fn hande_key_event(&mut self, ke: KeyEvent) -> FileListCommand {
-        if ke.kind == KeyEventKind::Press {
+        let command = if ke.kind == KeyEventKind::Press {
             match ke.code {
                 KeyCode::Char(c) => {
                     if c == 'q' {
@@ -153,7 +183,9 @@ impl Browser {
             }
         } else {
             FileListCommand::None
-        }
+        };
+
+        command
     }
 
     fn hint_mode(&mut self) -> Result<()> {
@@ -299,11 +331,45 @@ impl Browser {
                 fs::remove_file(path)?;
             }
         }
-        
+
         // Forces reload of files
         self.change_directory(self.curr_dir.clone())?;
 
         self.window.clipboard.clear();
+        Ok(())
+    }
+
+    fn refresh_preview(&mut self) -> Result<()> {
+        let path = PathBuf::from(self.window.file_list.curr_entry()).canonicalize()?;
+
+        if !path.is_file() {
+            self.window.preview.update_lines(Vec::new());
+
+            return Ok(());
+        }
+
+        let command = Command::new("bat")
+            .arg("-P")
+            .arg("--wrap=never")
+            .arg(format!(
+                "--line-range=1:{}",
+                self.window.preview.max_lines()
+            ))
+            .arg("--number")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .spawn()?;
+
+        self.window.preview.update_lines(
+            command
+                .wait_with_output()?
+                .stdout
+                .lines()
+                .map(|l| l.expect("Unable to read preview"))
+                .collect(),
+        );
+
         Ok(())
     }
 
@@ -363,18 +429,24 @@ impl Browser {
         Ok(())
     }
 
-    fn execute_command(&mut self, comm: FileListCommand) -> Result<()> {
-        match comm {
-            FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(d),
-            FileListCommand::WindowScroll(d) => self.window.file_list.scroll_list(d),
-            FileListCommand::SelectEntry(p) => self.open_entry(p)?,
+    fn execute_command(&mut self, command: FileListCommand) -> Result<()> {
+        match &command {
+            FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(*d),
+            FileListCommand::WindowScroll(d) => self.window.file_list.scroll_list(*d),
+            FileListCommand::SelectEntry(p) => self.open_entry(p.clone())?,
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
-            FileListCommand::FinderMode(z) => self.finder_mode(z)?,
-            FileListCommand::Yank(c) => self.yank(c)?,
+            FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
+            FileListCommand::Yank(c) => self.yank(*c)?,
             FileListCommand::Paste => self.paste()?,
             FileListCommand::None => (),
         };
+
+        if command.refresh_preview() {
+            if let Err(_)= self.refresh_preview() {
+                self.window.preview.update_lines(Vec::new());
+            }
+        }
 
         Ok(())
     }

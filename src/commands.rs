@@ -6,11 +6,20 @@ pub enum FileListCommand {
     WindowScroll(bool),   // true if down scroll
     SelectEntry(PathBuf), // Selected entry (doesn't distinguish between dirs/files)
     HintMode,
-    FinderMode(bool),     // true if zoxide search
-    Yank(bool),           // true if cut
+    FinderMode(bool), // true if zoxide search
+    Yank(bool),       // true if cut
     Paste,
 
     Exit,
-    
+
     None,
+}
+
+impl FileListCommand {
+    pub fn refresh_preview(&self) -> bool {
+        match self {
+            FileListCommand::Exit | FileListCommand::None => false,
+            _ => true,
+        }
+    }
 }
