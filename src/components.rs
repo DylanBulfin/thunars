@@ -110,9 +110,8 @@ impl FileList {
 
     pub fn valid_hint(&mut self, hint: &String) -> bool {
         self.hint_choices
-            .right_values()
-            .enumerate()
-            .any(|(i, s)| i < self.files.len() && s == hint)
+            .iter()
+            .any(|(i, s)| *i + self.scroll < self.files.len() && s == hint)
     }
 
     pub fn jump_hint(&mut self, hint: String) {
@@ -389,7 +388,7 @@ pub struct Preview {
 }
 
 impl Preview {
-    pub fn update_lines(&mut self, lines: Vec<String>) {
+    pub fn update_lines(&mut self, mut lines: Vec<String>) {
         self.lines = lines
     }
 
@@ -411,7 +410,7 @@ impl Widget for Preview {
         let text = Text::from(
             self.lines
                 .iter()
-                .map(|s| Line::from(s.as_str().italic()))
+                .map(|s| Line::from(s[..(area.width - BLOCK_LINES) as usize].italic()))
                 .collect::<Vec<_>>(),
         );
         let block = Block::bordered().title(title);

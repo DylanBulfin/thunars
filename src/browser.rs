@@ -14,9 +14,12 @@ use crate::{
     Result,
 };
 use ignore::Walk;
-use ratatui::crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
-    style::Color,
+use ratatui::{
+    crossterm::{
+        event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+        style::Color,
+    },
+    Terminal,
 };
 
 pub struct Browser {
@@ -260,8 +263,12 @@ impl Browser {
             FileListCommand::None | FileListCommand::ExitHint => (), // hint mode handles the latter binding
         };
 
-        if command.should_refresh_preview() && self.refresh_preview().is_err() {
-            self.window.preview.update_lines(Vec::new());
+        if command.should_refresh_preview() {
+            // May need to clear terminal if artifacts keep happening
+            // self.terminal.clear()?;
+            if (self.refresh_preview().is_err()) {
+                self.window.preview.update_lines(Vec::new());
+            }
         }
 
         Ok(())
