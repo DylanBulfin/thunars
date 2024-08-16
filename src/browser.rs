@@ -367,7 +367,7 @@ impl Browser {
                 .map(String::from)
                 .collect(),
         );
-
+        
         Ok(())
     }
 
