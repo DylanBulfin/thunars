@@ -8,8 +8,8 @@ use std::{
 };
 
 use crate::{
-    commands::{FileListCommand, OmnibarMode},
     components::{ClipboardEntry, File, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
+    config::{Config, FileListCommand, FinderCommand, OmnibarCommand, OmnibarType},
     tui::Tui,
     Result,
 };
@@ -22,6 +22,7 @@ use ratatui::crossterm::{
 pub struct Browser {
     window: Window,
     terminal: Tui,
+    config: Config,
     curr_dir: PathBuf,
     exit: bool,
 }
@@ -68,13 +69,14 @@ fn fetch_files(dir: &Path) -> Result<Vec<File>> {
 }
 
 impl Browser {
-    pub fn init(terminal: Tui) -> Result<Browser> {
+    pub fn init(terminal: Tui, config: Config) -> Result<Browser> {
         let curr_dir = std::env::current_dir()?;
         let files = fetch_files(curr_dir.as_path())?;
 
         Ok(Self {
             window: Window::new(files, curr_dir.to_string_lossy().to_string()),
             terminal,
+            config,
             curr_dir,
             exit: false,
         })
@@ -101,11 +103,48 @@ impl Browser {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        self.file_list_mode()
+    }
+
+    fn file_list_command(&mut self, ke: KeyEvent) -> FileListCommand {
+        if ke.kind == KeyEventKind::Press {
+            match self.config.get_filelist_command(ke.code) {
+                Some(c) => c,
+                None => FileListCommand::None,
+            }
+        } else {
+            FileListCommand::None
+        }
+    }
+
+    fn finder_command(&mut self, ke: KeyEvent) -> FinderCommand {
+        if ke.kind == KeyEventKind::Press {
+            match self.config.get_finder_command(ke.code) {
+                Some(c) => c,
+                None => FinderCommand::None,
+            }
+        } else {
+            FinderCommand::None
+        }
+    }
+
+    fn omnibar_command(&mut self, ke: KeyEvent) -> OmnibarCommand {
+        if ke.kind == KeyEventKind::Press {
+            match self.config.get_omnibar_command(ke.code) {
+                Some(c) => c,
+                None => OmnibarCommand::None,
+            }
+        } else {
+            OmnibarCommand::None
+        }
+    }
+
+    fn file_list_mode(&mut self) -> Result<()> {
         loop {
             if event::poll(Duration::from_millis(16))? {
                 if let event::Event::Key(ke) = event::read()? {
-                    let command = self.hande_key_event(ke);
-                    self.execute_command(command)?
+                    let command = self.file_list_command(ke);
+                    self.execute_file_list_command(command)?
                 }
             }
 
@@ -117,78 +156,7 @@ impl Browser {
         }
     }
 
-    fn change_directory(&mut self, new_dir: PathBuf) -> Result<()> {
-        self.curr_dir = new_dir
-            .canonicalize()
-            .expect("Trying to cd to non-existent directory");
-
-        set_current_dir(self.curr_dir.as_path()).expect("Unable to change working directory");
-
-        let sorted_files = fetch_files(self.curr_dir.as_path())?;
-
-        self.window.file_list.update_files(sorted_files);
-        self.window
-            .curr_dir
-            .update_cwd(self.curr_dir.to_string_lossy().to_string());
-
-        Ok(())
-    }
-
-    fn open_file(&mut self, file: PathBuf) -> Result<()> {
-        let program = "code";
-
-        Command::new(program).arg(file).spawn()?;
-
-        Ok(())
-    }
-
-    fn hande_key_event(&mut self, ke: KeyEvent) -> FileListCommand {
-        if ke.kind == KeyEventKind::Press {
-            match ke.code {
-                KeyCode::Char(c) => {
-                    if c == 'q' {
-                        FileListCommand::Exit
-                    } else if c == 'd' {
-                        FileListCommand::WindowScroll(true)
-                    } else if c == 'u' {
-                        FileListCommand::WindowScroll(false)
-                    } else if c == 'n' {
-                        FileListCommand::EntryScroll(true)
-                    } else if c == 'e' {
-                        FileListCommand::EntryScroll(false)
-                    } else if c == 'f' {
-                        FileListCommand::HintMode
-                    } else if c == '/' {
-                        FileListCommand::FinderMode(false)
-                    } else if c == 'z' {
-                        FileListCommand::FinderMode(true)
-                    } else if c == 'y' {
-                        FileListCommand::Yank(false)
-                    } else if c == 'x' {
-                        FileListCommand::Yank(true)
-                    } else if c == 'p' {
-                        FileListCommand::Paste
-                    } else if c == 'r' {
-                        FileListCommand::OmnibarMode(OmnibarMode::Rename)
-                    } else if c == 't' {
-                        FileListCommand::OmnibarMode(OmnibarMode::Touch)
-                    } else if c == 'm' {
-                        FileListCommand::OmnibarMode(OmnibarMode::Mkdir)
-                    } else {
-                        FileListCommand::None
-                    }
-                }
-                KeyCode::Enter => FileListCommand::SelectEntry(
-                    self.get_canonical_entry()
-                        .expect("Unable to process selected entry"),
-                ),
-                _ => FileListCommand::None,
-            }
-        } else {
-            FileListCommand::None
-        }
-    }
-
+    // Eventually may make this configurable
     fn hint_mode(&mut self) -> Result<()> {
         self.window.hint_mode(true);
         let mut hint = String::new();
@@ -219,6 +187,188 @@ impl Browser {
         }
 
         self.window.hint_mode(false);
+
+        Ok(())
+    }
+
+    fn finder_mode(&mut self, zoxide: bool) -> Result<()> {
+        self.window.finder_mode(true);
+        self.window
+            .finder
+            .update_files(self.find(String::new(), zoxide)?);
+
+        loop {
+            if event::poll(Duration::from_millis(16))? {
+                if let Event::Key(ke) = event::read()? {
+                    let command = self.finder_command(ke);
+                    if self.execute_finder_command(command, zoxide)? {
+                        break;
+                    }
+                }
+            }
+
+            self.draw()?
+        }
+
+        self.window.finder_mode(false);
+        self.window.finder.update_files(Vec::new());
+        self.window.finder.set_text(String::new());
+        self.window.finder.reset();
+
+        Ok(())
+    }
+
+    fn omnibar_mode(&mut self, mode: OmnibarType) -> Result<()> {
+        self.window.omnibar_mode(true, mode);
+
+        loop {
+            if event::poll(Duration::from_millis(16))? {
+                if let Event::Key(ke) = event::read()? {
+                    let command = self.omnibar_command(ke);
+                    if self.execute_omnibar_command(command, mode)? {
+                        break;
+                    }
+                }
+            }
+
+            self.draw()?;
+        }
+
+        self.window.omnibar.set_text(String::new());
+        self.window.omnibar_mode(false, mode);
+
+        Ok(())
+    }
+
+    fn execute_file_list_command(&mut self, command: FileListCommand) -> Result<()> {
+        match &command {
+            FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(*d),
+            FileListCommand::SelectEntry => self.open_entry(self.get_canonical_entry()?)?,
+            FileListCommand::Exit => self.exit = true,
+            FileListCommand::HintMode => self.hint_mode()?,
+            FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
+            FileListCommand::OmnibarMode(m) => self.omnibar_mode(*m)?,
+            FileListCommand::Yank(c) => self.yank(*c)?,
+            FileListCommand::Paste => self.paste()?,
+            FileListCommand::None => (),
+        };
+
+        if command.should_refresh_preview() && self.refresh_preview().is_err() {
+            self.window.preview.update_lines(Vec::new());
+        }
+
+        Ok(())
+    }
+
+    fn execute_finder_command(&mut self, command: FinderCommand, zoxide: bool) -> Result<bool> {
+        match &command {
+            FinderCommand::Write(c) => {
+                let mut text = self.window.finder.text();
+                text.push(*c);
+                self.window
+                    .finder
+                    .update_files(self.find(text.clone(), zoxide)?);
+                self.window.finder.set_text(text);
+            }
+            FinderCommand::Backspace => {
+                let mut text = self.window.finder.text();
+                if !text.is_empty() {
+                    text.remove(text.len() - 1);
+                    self.window
+                        .finder
+                        .update_files(self.find(text.clone(), zoxide)?);
+                    self.window.finder.set_text(text);
+                }
+            }
+            FinderCommand::SelectEntry => {
+                self.open_entry(self.window.finder.selection().into())?;
+                return Ok(true);
+            }
+            FinderCommand::EntryScroll(d) => {
+                self.window.finder.scroll(*d);
+            }
+            FinderCommand::Exit => return Ok(true),
+            FinderCommand::None => (),
+        }
+
+        Ok(false)
+    }
+
+    fn execute_omnibar_command(
+        &mut self,
+        command: OmnibarCommand,
+        mode: OmnibarType,
+    ) -> Result<bool> {
+        let mut submit = false;
+
+        match command {
+            OmnibarCommand::Write(c) => {
+                let mut text = self.window.omnibar.text().clone();
+                text.push(c);
+
+                self.window.omnibar.set_text(text);
+            }
+            OmnibarCommand::Backspace => {
+                let mut text = self.window.omnibar.text().clone();
+                text.truncate(text.len().saturating_sub(1));
+
+                self.window.omnibar.set_text(text);
+            }
+            OmnibarCommand::Submit => submit = true,
+            OmnibarCommand::Exit => return Ok(true),
+            OmnibarCommand::None => (),
+        }
+
+        if submit {
+            let mut newpath = self.curr_dir.clone();
+            newpath.push(PathBuf::from(self.window.omnibar.text()));
+            match mode {
+                OmnibarType::Rename => {
+                    let entry = self.get_canonical_entry()?;
+                    if entry.is_dir() {
+                        panic!("Can't rename a directory")
+                    }
+
+                    fs::copy(&entry, newpath)?;
+                    fs::remove_file(entry)?;
+                }
+                OmnibarType::Touch => {
+                    fs::File::create(newpath)?;
+                }
+                OmnibarType::Mkdir => {
+                    fs::create_dir(newpath)?;
+                }
+            }
+
+            self.change_directory(self.curr_dir.clone())?;
+
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn change_directory(&mut self, new_dir: PathBuf) -> Result<()> {
+        self.curr_dir = new_dir
+            .canonicalize()
+            .expect("Trying to cd to non-existent directory");
+
+        set_current_dir(self.curr_dir.as_path()).expect("Unable to change working directory");
+
+        let sorted_files = fetch_files(self.curr_dir.as_path())?;
+
+        self.window.file_list.update_files(sorted_files);
+        self.window
+            .curr_dir
+            .update_cwd(self.curr_dir.to_string_lossy().to_string());
+
+        Ok(())
+    }
+
+    fn open_file(&mut self, file: PathBuf) -> Result<()> {
+        let program = "code";
+
+        Command::new(program).arg(file).spawn()?;
 
         Ok(())
     }
@@ -367,145 +517,6 @@ impl Browser {
                 .map(String::from)
                 .collect(),
         );
-        
-        Ok(())
-    }
-
-    fn finder_mode(&mut self, zoxide: bool) -> Result<()> {
-        self.window.finder_mode(true);
-        self.window
-            .finder
-            .update_files(self.find(String::new(), zoxide)?);
-
-        loop {
-            if event::poll(Duration::from_millis(16))? {
-                if let Event::Key(ke) = event::read()? {
-                    if ke.kind == KeyEventKind::Press {
-                        match ke.code {
-                            KeyCode::Esc => break,
-                            KeyCode::Char(c) => {
-                                let mut text = self.window.finder.text();
-                                text.push(c);
-                                self.window
-                                    .finder
-                                    .update_files(self.find(text.clone(), zoxide)?);
-                                self.window.finder.set_text(text);
-                            }
-                            KeyCode::Backspace => {
-                                let mut text = self.window.finder.text();
-                                if !text.is_empty() {
-                                    text.remove(text.len() - 1);
-                                    self.window
-                                        .finder
-                                        .update_files(self.find(text.clone(), zoxide)?);
-                                    self.window.finder.set_text(text);
-                                }
-                            }
-                            KeyCode::Enter => {
-                                self.open_entry(self.window.finder.selection().into())?;
-                                break;
-                            }
-                            KeyCode::Down | KeyCode::Tab => self.window.finder.scroll(true),
-                            KeyCode::Up | KeyCode::BackTab => self.window.finder.scroll(false),
-                            _ => (),
-                        }
-                    }
-                }
-            }
-
-            self.draw()?
-        }
-
-        self.window.finder_mode(false);
-        self.window.finder.update_files(Vec::new());
-        self.window.finder.set_text(String::new());
-        self.window.finder.reset();
-
-        Ok(())
-    }
-
-    fn omnibar_mode(&mut self, mode: OmnibarMode) -> Result<()> {
-        self.window.omnibar_mode(true, mode);
-
-        let mut submit = false;
-
-        loop {
-            if event::poll(Duration::from_millis(16))? {
-                if let Event::Key(ke) = event::read()? {
-                    if ke.kind == KeyEventKind::Press {
-                        match ke.code {
-                            KeyCode::Backspace => {
-                                let mut text = self.window.omnibar.text().clone();
-                                text.truncate(text.len().saturating_sub(1));
-
-                                self.window.omnibar.set_text(text);
-                            }
-                            KeyCode::Char(c) => {
-                                let mut text = self.window.omnibar.text().clone();
-                                text.push(c);
-
-                                self.window.omnibar.set_text(text);
-                            }
-                            KeyCode::Esc => break,
-                            KeyCode::Enter => {
-                                submit = true;
-                                break;
-                            }
-                            _ => (),
-                        }
-                    }
-                }
-            }
-
-            self.draw()?;
-        }
-
-        if submit {
-            let mut newpath = self.curr_dir.clone();
-            newpath.push(PathBuf::from(self.window.omnibar.text()));
-            match mode {
-                OmnibarMode::Rename => {
-                    let entry = self.get_canonical_entry()?;
-                    if entry.is_dir() {
-                        return Ok(());
-                    }
-
-                    fs::copy(&entry, newpath)?;
-                    fs::remove_file(entry)?;
-                }
-                OmnibarMode::Touch => {
-                    fs::File::create(newpath)?;
-                }
-                OmnibarMode::Mkdir => {
-                    fs::create_dir(newpath)?;
-                }
-            }
-            self.change_directory(self.curr_dir.clone())?;
-        }
-
-        self.window.omnibar.set_text(String::new());
-        self.window.omnibar_mode(false, mode);
-
-        Ok(())
-    }
-
-    fn execute_command(&mut self, command: FileListCommand) -> Result<()> {
-        match &command {
-            FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(*d),
-            FileListCommand::WindowScroll(d) => self.window.file_list.scroll_list(*d),
-            FileListCommand::SelectEntry(p) => self.open_entry(p.clone())?,
-            FileListCommand::Exit => self.exit = true,
-            FileListCommand::HintMode => self.hint_mode()?,
-            FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
-            FileListCommand::OmnibarMode(m) => self.omnibar_mode(*m)?,
-            FileListCommand::Yank(c) => self.yank(*c)?,
-            FileListCommand::Paste => self.paste()?,
-            FileListCommand::None => (),
-        };
-
-        if command.should_refresh_preview() && self.refresh_preview().is_err() {
-            self.window.preview.update_lines(Vec::new());
-        }
 
         Ok(())
     }

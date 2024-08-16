@@ -2,8 +2,11 @@
 name = "thunars"
 version = "0.1.0"
 edition = "2021"
+include = ["config/default.toml"]
 
 [dependencies]
 bimap = "0.6.3"
+homedir = "0.3.3"
 ignore = "0.4.22"
 ratatui = "0.28.0"
+toml = "0.8.19"

@@ -1,13 +1,19 @@
 pub mod browser;
-pub mod tui;
 mod components;
-mod commands;
+pub mod config;
+pub mod tui;
 
-use std::{fmt::{self, Display, Formatter}, io, result};
+use std::{
+    fmt::{self, Display, Formatter},
+    io, result,
+};
+
+use homedir::GetHomeError;
 
 #[derive(Debug)]
 pub enum Error {
     IOError(io::Error),
+    GetHomeError(GetHomeError),
 }
 
 impl From<io::Error> for Error {
@@ -16,10 +22,17 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<GetHomeError> for Error {
+    fn from(value: GetHomeError) -> Self {
+        Self::GetHomeError(value)
+    }
+}
+
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Error::IOError(e) => f.write_fmt(format_args!("{}", e)),
+            Error::GetHomeError(e) => f.write_fmt(format_args!("{}", e)),
         }
     }
 }

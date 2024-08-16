@@ -9,7 +9,7 @@ use ratatui::{
     widgets::{block::Title, Block, Paragraph, Widget},
 };
 
-use crate::commands::OmnibarMode;
+use crate::config::OmnibarType;
 
 pub const BLOCK_LINES: u16 = 2;
 
@@ -83,16 +83,6 @@ impl FileList {
 
     pub fn set_max_entries(&mut self, max_entries: usize) {
         self.max_entries = max_entries;
-    }
-
-    pub fn scroll_list(&mut self, down: bool) {
-        if down {
-            if self.scroll < self.files.len().saturating_sub(self.max_entries) {
-                self.scroll += 1;
-            }
-        } else {
-            self.scroll = self.scroll.saturating_sub(1);
-        }
     }
 
     pub fn scroll_entry(&mut self, down: bool) {
@@ -431,7 +421,7 @@ impl Widget for Preview {
 pub struct Omnibar {
     visible: bool,
     text: String,
-    mode: OmnibarMode,
+    mode: OmnibarType,
 }
 
 impl Omnibar {
@@ -450,9 +440,9 @@ impl Widget for Omnibar {
         Self: Sized,
     {
         let title = Title::from(match self.mode {
-            OmnibarMode::Rename => "Rename",
-            OmnibarMode::Touch => "New File",
-            OmnibarMode::Mkdir => "New Directory",
+            OmnibarType::Rename => "Rename",
+            OmnibarType::Touch => "New File",
+            OmnibarType::Mkdir => "New Directory",
         });
         let text = Text::from(Line::from(self.text));
         let block = Block::bordered().title(title);
@@ -511,7 +501,7 @@ impl Window {
         let omnibar = Omnibar {
             visible: false,
             text: String::new(),
-            mode: OmnibarMode::Rename,
+            mode: OmnibarType::Rename,
         };
 
         Self {
@@ -545,7 +535,7 @@ impl Window {
         }
     }
 
-    pub fn omnibar_mode(&mut self, on: bool, mode: OmnibarMode) {
+    pub fn omnibar_mode(&mut self, on: bool, mode: OmnibarType) {
         self.omnibar.mode = mode;
         if on {
             self.file_list.visible = false;

@@ -1,0 +1,26 @@
+[filelist]
+scroll_down = "n"
+scroll_up = "e"
+select_entry = "enter"
+hint_mode = "f"
+finder_fzf = "/"
+finder_zoxide = "z"
+rename = "r"
+touch = "t"
+mkdir = "m"
+yank = "y"
+cut = "x"
+paste = "p"
+exit = "q"
+
+[finder]
+backspace = "backspace"
+select_entry = "enter"
+scroll_down = "down"
+scroll_up = "up"
+exit = "esc"
+
+[omnibar]
+backspace = "backspace"
+submit = "enter"
+exit = "esc"
