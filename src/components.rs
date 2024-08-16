@@ -109,7 +109,10 @@ impl FileList {
     }
 
     pub fn valid_hint(&mut self, hint: &String) -> bool {
-        self.hint_choices.right_values().any(|s| s == hint)
+        self.hint_choices
+            .right_values()
+            .enumerate()
+            .any(|(i, s)| i < self.files.len() && s == hint)
     }
 
     pub fn jump_hint(&mut self, hint: String) {

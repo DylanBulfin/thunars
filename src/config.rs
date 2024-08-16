@@ -24,6 +24,7 @@ pub enum FileListCommand {
     Paste,
 
     Exit,
+    ExitHint,
 
     None,
 }
@@ -50,6 +51,7 @@ impl From<&str> for FileListCommand {
             "cut" => FileListCommand::Yank(true),
             "paste" => FileListCommand::Paste,
             "exit" => FileListCommand::Exit,
+            "exit_hint" => FileListCommand::ExitHint,
             _ => FileListCommand::None,
         }
     }
@@ -164,6 +166,7 @@ impl Config {
             "cut",
             "paste",
             "exit",
+            "exit_hint"
         ];
 
         for k in keys {

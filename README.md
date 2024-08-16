@@ -12,7 +12,7 @@
     - Similar to `hop.nvim`/`leap.nvim`, or the browser extension `Vimium (C)`
 
 ## Goals
-- Fully configurable keybindings (in all modes)
+- ~~Fully configurable keybindings (in all modes)~~
 - Configurable file associations (e.g. open some file types with specific programs)
 - Basic file manipulation support
     - ~~Cut/Copy files one by one~~

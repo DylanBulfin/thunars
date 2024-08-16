@@ -12,6 +12,7 @@ yank = "y"
 cut = "x"
 paste = "p"
 exit = "q"
+exit_hint = "esc"
 
 [finder]
 backspace = "backspace"

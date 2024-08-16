@@ -161,28 +161,35 @@ impl Browser {
         self.window.hint_mode(true);
         let mut hint = String::new();
 
-        loop {
+        let submit = loop {
             if event::poll(Duration::from_millis(16))? {
                 if let Event::Key(ke) = event::read()? {
                     if ke.kind == KeyEventKind::Press {
                         match ke.code {
-                            KeyCode::Esc => break,
                             KeyCode::Char(c) => {
                                 hint.push(c);
                                 if self.window.file_list.valid_hint(&hint) {
-                                    break;
+                                    break true;
+                                } else if hint.len() >= 2 {
+                                    break false;
                                 }
                             }
-                            _ => (),
+                            c => {
+                                if let Some(FileListCommand::ExitHint) =
+                                    self.config.get_filelist_command(c)
+                                {
+                                    break false;
+                                }
+                            }
                         }
                     }
                 }
             }
 
             self.draw()?;
-        }
+        };
 
-        if self.window.file_list.valid_hint(&hint) {
+        if submit {
             self.window.file_list.jump_hint(hint)
         }
 
@@ -244,13 +251,13 @@ impl Browser {
         match &command {
             FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(*d),
             FileListCommand::SelectEntry => self.open_entry(self.get_canonical_entry()?)?,
-            FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
             FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
             FileListCommand::OmnibarMode(m) => self.omnibar_mode(*m)?,
             FileListCommand::Yank(c) => self.yank(*c)?,
             FileListCommand::Paste => self.paste()?,
-            FileListCommand::None => (),
+            FileListCommand::Exit => self.exit = true,
+            FileListCommand::None | FileListCommand::ExitHint => (), // hint mode handles the latter binding
         };
 
         if command.should_refresh_preview() && self.refresh_preview().is_err() {
