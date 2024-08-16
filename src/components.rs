@@ -14,6 +14,9 @@ pub const BLOCK_LINES: u16 = 2;
 pub const CURR_DIR_LINES: u16 = 1;
 pub const CURR_DIR_HEIGHT: u16 = BLOCK_LINES + CURR_DIR_LINES;
 
+pub const RENAME_LINES:u16 = 1;
+pub const RENAME_HEIGHT: u16 = BLOCK_LINES + RENAME_LINES;
+
 pub const CONTROLS_LINES: u16 = 3;
 pub const CONTROLS_HEIGHT: u16 = BLOCK_LINES + CONTROLS_LINES;
 
@@ -254,7 +257,7 @@ impl Finder {
         }
     }
 
-    pub fn selection(&self) -> &'_ String {
+    pub fn selection(&self) -> &String {
         &self.files[self.selected]
     }
 
@@ -363,7 +366,7 @@ impl Clipboard {
         self.files.clear();
     }
 
-    pub fn get_files(&self) -> &'_ Vec<ClipboardEntry> {
+    pub fn get_files(&self) -> &Vec<ClipboardEntry> {
         &self.files
     }
 
@@ -430,12 +433,42 @@ impl Widget for Preview {
 }
 
 #[derive(Clone)]
+pub struct Rename {
+    visible: bool,
+    text: String,
+}
+
+impl Rename {
+    pub fn text(&self) -> &String {
+        &self.text
+    }
+
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
+    }
+}
+
+impl Widget for Rename {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        let title = Title::from("Rename");
+        let text = Text::from(Line::from(self.text));
+        let block = Block::bordered().title(title);
+
+        Paragraph::new(text).block(block).render(area, buf);
+    }
+}
+
+#[derive(Clone)]
 pub struct Window {
     pub(crate) file_list: FileList,
     pub(crate) curr_dir: CurrDirectory,
     pub(crate) finder: Finder,
     pub(crate) clipboard: Clipboard,
     pub(crate) preview: Preview,
+    pub(crate) rename: Rename,
 }
 
 impl Window {
@@ -475,12 +508,18 @@ impl Window {
             max_lines: 0,
         };
 
+        let rename = Rename {
+            visible: false,
+            text: String::new(),
+        };
+
         Self {
             file_list,
             curr_dir,
             finder,
             clipboard,
             preview,
+            rename,
         }
     }
 
@@ -494,6 +533,7 @@ impl Window {
             self.curr_dir.visible = false;
             self.clipboard.visible = false;
             self.preview.visible = false;
+            self.rename.visible = false;
             self.finder.visible = true;
         } else {
             self.file_list.visible = true;
@@ -501,6 +541,23 @@ impl Window {
             self.clipboard.visible = true;
             self.preview.visible = true;
             self.finder.visible = false;
+        }
+    }
+    
+    pub fn rename_mode(&mut self, on:bool){
+        if on {
+            self.file_list.visible = false;
+            self.curr_dir.visible = false;
+            self.clipboard.visible = false;
+            self.preview.visible = false;
+            self.finder.visible = false;
+            self.rename.visible = true;
+        }else{
+            self.file_list.visible = true;
+            self.curr_dir.visible = true;
+            self.clipboard.visible = true;
+            self.preview.visible = true;
+            self.rename.visible = false;
         }
     }
 }
@@ -531,6 +588,8 @@ impl Widget for Window {
         );
 
         let fd_area = Rect::new(area.width / 8, 0, 3 * area.width / 4, area.height);
+        
+        let rn_area = Rect::new(area.width / 4, area.height/2, area.width/ 2, RENAME_HEIGHT);
 
         if self.file_list.visible {
             self.file_list.render(fl_area, buf);
@@ -550,6 +609,10 @@ impl Widget for Window {
 
         if self.finder.visible {
             self.finder.render(fd_area, buf);
+        }
+        
+        if self.rename.visible {
+            self.rename.render(rn_area, buf)
         }
     }
 }

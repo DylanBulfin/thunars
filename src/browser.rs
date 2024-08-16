@@ -171,6 +171,8 @@ impl Browser {
                         FileListCommand::Yank(true)
                     } else if c == 'p' {
                         FileListCommand::Paste
+                    } else if c == 'r' {
+                        FileListCommand::RenameMode
                     } else {
                         FileListCommand::None
                     }
@@ -226,7 +228,7 @@ impl Browser {
     }
 
     fn open_entry(&mut self, entry: PathBuf) -> Result<()> {
-        if entry.is_dir() {
+        if entry.as_path().is_dir() {
             self.change_directory(entry)?;
         } else {
             self.open_file(entry)?;
@@ -429,6 +431,66 @@ impl Browser {
         Ok(())
     }
 
+    fn rename_mode(&mut self) -> Result<()> {
+        let entry = self.get_canonical_entry()?;
+        if entry.is_dir() {
+            return Ok(());
+        }
+
+        self.window.rename_mode(true);
+
+        let mut proceed = false;
+
+        loop {
+            if event::poll(Duration::from_millis(16))? {
+                match event::read()? {
+                    Event::Key(ke) => {
+                        if ke.kind == KeyEventKind::Press {
+                            match ke.code {
+                                KeyCode::Backspace => {
+                                    let mut text = self.window.rename.text().clone();
+                                    text.truncate(text.len().saturating_sub(1));
+
+                                    self.window.rename.set_text(text);
+                                }
+                                KeyCode::Char(c) => {
+                                    let mut text = self.window.rename.text().clone();
+                                    text.push(c);
+
+                                    self.window.rename.set_text(text);
+                                }
+                                KeyCode::Esc => break,
+                                KeyCode::Enter => {
+                                    proceed = true;
+                                    break;
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    _ => (),
+                }
+            }
+
+            self.draw()?;
+        }
+
+        if proceed {
+            let mut newpath = self.curr_dir.clone();
+            newpath.push(PathBuf::from(self.window.rename.text()));
+
+            fs::copy(&entry, &newpath)?;
+            fs::remove_file(entry)?;
+
+            self.change_directory(self.curr_dir.clone())?;
+        }
+
+        self.window.rename.set_text(String::new());
+        self.window.rename_mode(false);
+
+        Ok(())
+    }
+
     fn execute_command(&mut self, command: FileListCommand) -> Result<()> {
         match &command {
             FileListCommand::EntryScroll(d) => self.window.file_list.scroll_entry(*d),
@@ -437,13 +499,14 @@ impl Browser {
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
             FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
+            FileListCommand::RenameMode => self.rename_mode()?,
             FileListCommand::Yank(c) => self.yank(*c)?,
             FileListCommand::Paste => self.paste()?,
             FileListCommand::None => (),
         };
 
         if command.refresh_preview() {
-            if let Err(_)= self.refresh_preview() {
+            if let Err(_) = self.refresh_preview() {
                 self.window.preview.update_lines(Vec::new());
             }
         }
