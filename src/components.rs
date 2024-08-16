@@ -433,12 +433,12 @@ impl Widget for Preview {
 }
 
 #[derive(Clone)]
-pub struct Rename {
+pub struct Omnibar {
     visible: bool,
     text: String,
 }
 
-impl Rename {
+impl Omnibar {
     pub fn text(&self) -> &String {
         &self.text
     }
@@ -448,7 +448,7 @@ impl Rename {
     }
 }
 
-impl Widget for Rename {
+impl Widget for Omnibar {
     fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
@@ -468,7 +468,7 @@ pub struct Window {
     pub(crate) finder: Finder,
     pub(crate) clipboard: Clipboard,
     pub(crate) preview: Preview,
-    pub(crate) rename: Rename,
+    pub(crate) omnibar: Omnibar,
 }
 
 impl Window {
@@ -508,7 +508,7 @@ impl Window {
             max_lines: 0,
         };
 
-        let rename = Rename {
+        let rename = Omnibar {
             visible: false,
             text: String::new(),
         };
@@ -519,7 +519,7 @@ impl Window {
             finder,
             clipboard,
             preview,
-            rename,
+            omnibar: rename,
         }
     }
 
@@ -533,7 +533,7 @@ impl Window {
             self.curr_dir.visible = false;
             self.clipboard.visible = false;
             self.preview.visible = false;
-            self.rename.visible = false;
+            self.omnibar.visible = false;
             self.finder.visible = true;
         } else {
             self.file_list.visible = true;
@@ -544,20 +544,20 @@ impl Window {
         }
     }
     
-    pub fn rename_mode(&mut self, on:bool){
+    pub fn omnibar_mode(&mut self, on:bool){
         if on {
             self.file_list.visible = false;
             self.curr_dir.visible = false;
             self.clipboard.visible = false;
             self.preview.visible = false;
             self.finder.visible = false;
-            self.rename.visible = true;
+            self.omnibar.visible = true;
         }else{
             self.file_list.visible = true;
             self.curr_dir.visible = true;
             self.clipboard.visible = true;
             self.preview.visible = true;
-            self.rename.visible = false;
+            self.omnibar.visible = false;
         }
     }
 }
@@ -611,8 +611,8 @@ impl Widget for Window {
             self.finder.render(fd_area, buf);
         }
         
-        if self.rename.visible {
-            self.rename.render(rn_area, buf)
+        if self.omnibar.visible {
+            self.omnibar.render(rn_area, buf)
         }
     }
 }

@@ -1,5 +1,12 @@
 use std::path::PathBuf;
 
+#[derive(Clone, Copy)]
+pub enum OmnibarMode {
+    Rename,
+    Touch,
+    Mkdir,
+}
+
 #[derive(Clone)]
 pub enum FileListCommand {
     EntryScroll(bool),    // true if down scroll
@@ -7,8 +14,8 @@ pub enum FileListCommand {
     SelectEntry(PathBuf), // Selected entry (doesn't distinguish between dirs/files)
     HintMode,
     FinderMode(bool), // true if zoxide search
-    RenameMode,
-    Yank(bool),       // true if cut
+    OmnibarMode(OmnibarMode),
+    Yank(bool), // true if cut
     Paste,
 
     Exit,

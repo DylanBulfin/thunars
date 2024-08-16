@@ -4,11 +4,12 @@ use std::{
     io::{BufRead, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    str::Lines,
     time::Duration,
 };
 
 use crate::{
-    commands::FileListCommand,
+    commands::{FileListCommand, OmnibarMode},
     components::{ClipboardEntry, File, Window, BLOCK_LINES, CURR_DIR_LINES, TOTAL_USED_LINES},
     tui::Tui,
     Result,
@@ -172,7 +173,11 @@ impl Browser {
                     } else if c == 'p' {
                         FileListCommand::Paste
                     } else if c == 'r' {
-                        FileListCommand::RenameMode
+                        FileListCommand::OmnibarMode(OmnibarMode::Rename)
+                    } else if c == 't' {
+                        FileListCommand::OmnibarMode(OmnibarMode::Touch)
+                    } else if c == 'm' {
+                        FileListCommand::OmnibarMode(OmnibarMode::Mkdir)
                     } else {
                         FileListCommand::None
                     }
@@ -363,12 +368,12 @@ impl Browser {
             .stdout(Stdio::piped())
             .spawn()?;
 
+        // Processing it like this lets us mostly catch utf-8 issues
         self.window.preview.update_lines(
-            command
-                .wait_with_output()?
-                .stdout
+            String::from_utf8(command.wait_with_output()?.stdout)
+                .unwrap_or(String::new())
                 .lines()
-                .map(|l| l.expect("Unable to read preview"))
+                .map(String::from)
                 .collect(),
         );
 
@@ -431,15 +436,10 @@ impl Browser {
         Ok(())
     }
 
-    fn rename_mode(&mut self) -> Result<()> {
-        let entry = self.get_canonical_entry()?;
-        if entry.is_dir() {
-            return Ok(());
-        }
+    fn omnibar_mode(&mut self, mode: OmnibarMode) -> Result<()> {
+        self.window.omnibar_mode(true);
 
-        self.window.rename_mode(true);
-
-        let mut proceed = false;
+        let mut submit = false;
 
         loop {
             if event::poll(Duration::from_millis(16))? {
@@ -448,20 +448,20 @@ impl Browser {
                         if ke.kind == KeyEventKind::Press {
                             match ke.code {
                                 KeyCode::Backspace => {
-                                    let mut text = self.window.rename.text().clone();
+                                    let mut text = self.window.omnibar.text().clone();
                                     text.truncate(text.len().saturating_sub(1));
 
-                                    self.window.rename.set_text(text);
+                                    self.window.omnibar.set_text(text);
                                 }
                                 KeyCode::Char(c) => {
-                                    let mut text = self.window.rename.text().clone();
+                                    let mut text = self.window.omnibar.text().clone();
                                     text.push(c);
 
-                                    self.window.rename.set_text(text);
+                                    self.window.omnibar.set_text(text);
                                 }
                                 KeyCode::Esc => break,
                                 KeyCode::Enter => {
-                                    proceed = true;
+                                    submit = true;
                                     break;
                                 }
                                 _ => (),
@@ -475,18 +475,31 @@ impl Browser {
             self.draw()?;
         }
 
-        if proceed {
+        if submit {
             let mut newpath = self.curr_dir.clone();
-            newpath.push(PathBuf::from(self.window.rename.text()));
+            newpath.push(PathBuf::from(self.window.omnibar.text()));
+            match mode {
+                OmnibarMode::Rename => {
+                    let entry = self.get_canonical_entry()?;
+                    if entry.is_dir() {
+                        return Ok(());
+                    }
 
-            fs::copy(&entry, &newpath)?;
-            fs::remove_file(entry)?;
-
+                    fs::copy(&entry, newpath)?;
+                    fs::remove_file(entry)?;
+                }
+                OmnibarMode::Touch => {
+                    fs::File::create(newpath)?;
+                }
+                OmnibarMode::Mkdir => {
+                    fs::create_dir(newpath)?;
+                }
+            }
             self.change_directory(self.curr_dir.clone())?;
         }
 
-        self.window.rename.set_text(String::new());
-        self.window.rename_mode(false);
+        self.window.omnibar.set_text(String::new());
+        self.window.omnibar_mode(false);
 
         Ok(())
     }
@@ -499,7 +512,7 @@ impl Browser {
             FileListCommand::Exit => self.exit = true,
             FileListCommand::HintMode => self.hint_mode()?,
             FileListCommand::FinderMode(z) => self.finder_mode(*z)?,
-            FileListCommand::RenameMode => self.rename_mode()?,
+            FileListCommand::OmnibarMode(m) => self.omnibar_mode(*m)?,
             FileListCommand::Yank(c) => self.yank(*c)?,
             FileListCommand::Paste => self.paste()?,
             FileListCommand::None => (),

@@ -16,12 +16,12 @@
 - Configurable file associations (e.g. open some file types with specific programs)
 - Basic file manipulation support
     - ~~Cut/Copy files one by one~~
-    - Rename files
-    - Create directory/empty file
+    - ~~Rename files~~
+    - ~~Create directory/empty file~~
     - Delete file/directory
-- File details panel (On hold till I figure out a good layout)
+- File details panel (On hold until I figure out a good layout)
     - Maybe just a 5 line or something thing on the side with the preview panel
-- ~~File previews~~ Basic done
+- ~~File previews~~ Done for text only
 
 ### Stretch Goals
 - Some way to customize layout

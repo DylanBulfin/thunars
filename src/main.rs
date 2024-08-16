@@ -19,5 +19,6 @@ fn main() -> Result<()> {
     browser.run()?;
 
     tui::restore()?;
-    unimplemented!()
+    
+    Ok(())
 }
