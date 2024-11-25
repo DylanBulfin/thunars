@@ -378,7 +378,7 @@ impl Browser {
     }
 
     fn open_file(&mut self, file: PathBuf) -> Result<()> {
-        let program = "code";
+        let program = "nvim";
 
         Command::new(program).arg(file).spawn()?;
 

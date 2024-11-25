@@ -410,7 +410,7 @@ impl Widget for Preview {
         let text = Text::from(
             self.lines
                 .iter()
-                .map(|s| Line::from(s[..(area.width - BLOCK_LINES) as usize].italic()))
+                .map(|s| Line::from(s[..s.len().min((area.width - BLOCK_LINES) as usize)].italic()))
                 .collect::<Vec<_>>(),
         );
         let block = Block::bordered().title(title);
